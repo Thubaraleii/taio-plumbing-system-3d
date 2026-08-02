@@ -506,15 +506,20 @@ def main():
     # (norte real em UTM), gira junto com a camera ao orbitar a cena (ao
     # contrario de um overlay 2D fixo na tela, que nao indicaria norte de
     # verdade numa cena 3D que o usuario pode rotacionar livremente).
-    # Fica FORA da extensao real do modelo (a leste, xaxis range ganha uma
-    # margem extra so pra caber ela) -- dentro da extensao ela ficava "por
-    # cima" de lobos do sill/dique em varios angulos de camera (a elevacao
-    # em Z nao evita a ambiguidade visual da perspectiva).
+    # Fica FORA da extensao real do modelo nos 3 eixos (X, Y E Z ganham
+    # margem extra so pra caber ela) -- ha um lobo do sill bem no canto
+    # nordeste real dos dados, entao so afastar em X (ou so elevar em Z) nao
+    # bastava, ainda ficava "colada" nele em varios angulos de camera. Afasta
+    # em X, afasta em Y (passa do proprio ymax, nao só encosta nele) E eleva
+    # em Z ao mesmo tempo.
     comprimento_seta = (ymax - ymin) * 0.07
-    margem_seta_x = (xmax - xmin) * 0.05
-    seta_x = xmax + margem_seta_x * 0.5
-    seta_y0, seta_y1 = ymax - comprimento_seta, ymax
-    seta_z = (grid_z.max() + grid_z.min()) / 2
+    margem_seta_x = (xmax - xmin) * 0.18
+    seta_x = xmax + margem_seta_x * 0.75
+    margem_seta_y = (ymax - ymin) * 0.05
+    seta_y1 = ymax + margem_seta_y * 0.6
+    seta_y0 = seta_y1 - comprimento_seta
+    margem_seta_z = (grid_z.max() - grid_z.min()) * 0.25
+    seta_z = grid_z.max() + margem_seta_z
     fig.add_trace(go.Scatter3d(
         x=[seta_x, seta_x], y=[seta_y0, seta_y1], z=[seta_z, seta_z],
         mode="lines", line=dict(color=MARCA_ROXO, width=7),
@@ -549,7 +554,9 @@ def main():
             frames.append(go.Frame(data=dados_frame, name=f"{modo}_{p}", traces=list(range(n_traces_total))))
     fig.frames = frames
 
-    zmin, zmax = grid_z.min() - max(PROFUNDIDADE_CAMADAS), grid_z.max()
+    # zaxis com folga extra no topo (margem_seta_z) so pra caber a seta do norte, elevada
+    # acima do relevo de proposito (ver comentario acima).
+    zmin, zmax = grid_z.min() - max(PROFUNDIDADE_CAMADAS), grid_z.max() + margem_seta_z
     eixo_3d = dict(
         gridcolor="#3D3560", zerolinecolor="#3D3560", showbackground=True,
         backgroundcolor=MARCA_NAVY, color=MARCA_CINZA_CLARO,
@@ -563,10 +570,10 @@ def main():
         paper_bgcolor=MARCA_NAVY,
         font=dict(family=MARCA_FONTE, color=MARCA_CINZA_CLARO),
         scene=dict(
-            # xaxis com folga extra a leste (margem_seta_x) so pra caber a seta do norte,
-            # que fica fora da extensao real do modelo de proposito (ver comentario acima).
+            # xaxis/yaxis com folga extra a nordeste (margem_seta_x/y) so pra caber a seta
+            # do norte, que fica fora da extensao real do modelo de proposito (ver comentario acima).
             xaxis=dict(title="X (UTM)", range=[xmin, xmax + margem_seta_x], **eixo_3d),
-            yaxis=dict(title="Y (UTM)", range=[ymin, ymax], **eixo_3d),
+            yaxis=dict(title="Y (UTM)", range=[ymin, ymax + margem_seta_y], **eixo_3d),
             zaxis=dict(title="Z (m)", range=[zmin, zmax], **eixo_3d),
             aspectmode="manual",
             aspectratio=dict(
