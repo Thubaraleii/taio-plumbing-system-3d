@@ -15,6 +15,9 @@ Construir o modelo 3D do sistema intrusivo de Taió usando **GemPy** (modelagem 
 
 Veja `docs/fluxo_de_trabalho.md` para o detalhe passo a passo, e `ambiente/SETUP.md` para instalar o ambiente Python com GemPy.
 
+O visualizador 2D interativo (mapa em planta + seção transversal) também tem
+repositório próprio: [taio-plumbing-system-2d](https://github.com/Thubaraleii/taio-plumbing-system-2d).
+
 ## Status (atualizado em 30/07/2026)
 
 - **Dados estruturais reais já ligados**: `2_Banco_de_Dados` extraiu 158 pontos de contato e 104 orientações de campo dos shapefiles que já existiam em `0_ORGANIZADO` (ver `2_Banco_de_Dados/README.md`), e eles já estão em `dados_entrada/pontos_estruturais/`. `EXTENT` e `PILHA_ESTRATIGRAFICA` em `scripts/02_montar_modelo_gempy.py` já foram ajustados para a área e as formações reais (`sill_diabasio`, `encaixante_sedimentar`).
