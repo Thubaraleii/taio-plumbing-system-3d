@@ -1,0 +1,9 @@
+# Ambiente Python para o pipeline GemPy -> Blender do modelo de Taió
+# Testado nesta sessão com: gempy 2026.0.3
+
+gempy
+rasterio
+pyvista
+pandas
+numpy
+matplotlib

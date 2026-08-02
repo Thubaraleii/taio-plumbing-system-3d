@@ -1,0 +1,7 @@
+venv/
+__pycache__/
+*.pyc
+*.blend1
+.ipynb_checkpoints/
+.claude/
+.vscode/
