@@ -1,0 +1,688 @@
+"""Visualizador 2D interativo (Plotly, HTML autonomo) da secao transversal
+estilizada -- mapa em planta do lado (clicavel -- clique escolhe a posicao
+da linha de corte) e a secao transversal do lado, sincronizados via
+slider/frames. A linha de corte pode ser rotacionada (botoes: horizontal,
+vertical, 2 diagonais) -- pra cada angulo, o slider desliza a linha
+perpendicularmente cobrindo toda a extensao do modelo. Mesma paleta/dados
+estilizados do cubao 3D (gerar_visualizador_3d.py) e da secao estatica em
+../scripts/07_gerar_secao_transversal.py.
+
+Uso:
+    python visualizacao_web/gerar_secao_interativa.py
+
+Gera:
+    visualizacao_web/secao_interativa.html
+"""
+import base64
+from pathlib import Path
+
+import geopandas as gpd
+import numpy as np
+import plotly.graph_objects as go
+import rasterio.features
+from affine import Affine
+from plotly.subplots import make_subplots
+from scipy.interpolate import LinearNDInterpolator, NearestNDInterpolator, griddata
+from shapely.geometry import Point, shape as shapely_shape
+from shapely.geometry.polygon import orient
+from shapely.ops import unary_union
+
+BASE = Path(r"C:\Users\thuba\Desktop\Mestrado\1_Modelo_3D_Taio")
+TOPO_NPY = BASE / "dados_entrada" / "topografia_drone" / "topografia_xyz.npy"
+POLIGONO_REFERENCIA = BASE.parent / "2_Banco_de_Dados" / "dados_base" / "poligon_intrusiva.shp"
+POLIGONOS_CPRM_GEOJSON = BASE.parent / "2_Banco_de_Dados" / "saida_processada" / "formacoes_cprm_poligonos.geojson"
+LOGO_PATH = Path(__file__).parent / "assets" / "logo_gstech.jpg"
+OUT_HTML = Path(__file__).parent / "secao_interativa.html"
+
+# identidade visual GS Tech (marca do usuario, aplicada por cima do produto --
+# nao mexe em nada do modelo/dados). Mesma paleta de
+# ../visualizacao_web/gerar_visualizador_3d.py, manter as duas em sincronia.
+MARCA_ROXO_ESCURO = "#2D0A4A"
+MARCA_ROXO = "#7B2FFF"
+MARCA_AZUL = "#2E6F95"
+MARCA_NAVY = "#1B1F2E"
+MARCA_CINZA_CLARO = "#F2F2F2"
+MARCA_FONTE = "Montserrat, Arial, sans-serif"
+
+
+def logo_base64():
+    if not LOGO_PATH.exists():
+        return None
+    return base64.b64encode(LOGO_PATH.read_bytes()).decode("ascii")
+
+X_MIN, X_MAX = 582500.0, 604500.0
+Y_MIN, Y_MAX = 6995000.0, 7029000.0
+CX, CY = (X_MIN + X_MAX) / 2, (Y_MIN + Y_MAX) / 2
+
+# angulos de corte disponiveis (graus, 0 = leste, sentido anti-horario --
+# mesma convencao de vetor direcao (cos,sin)). Um botao por angulo; o
+# slider desliza a linha perpendicularmente a ela, cobrindo a extensao real
+# do modelo (calculado abaixo via projecao dos 4 cantos do bbox).
+ANGULOS = [
+    ("Horizontal (O↔L)", 0.0),
+    ("Diagonal (SO↔NE)", 45.0),
+    ("Vertical (S↔N)", 90.0),
+    ("Diagonal (SE↔NO)", 135.0),
+]
+PASSO_POSICAO = 1000.0  # espacamento fixo (m) entre posicoes do slider -- cobre o mapa todo
+N_AMOSTRAS = 300
+RESOLUCAO_MAPA = 150
+
+# 5 formacoes sedimentares REAIS (Bacia do Parana, Grupo Guata/Passa Dois),
+# mais nova (topo) -> mais antiga (base). Espessuras da literatura (busca em
+# 01/08/2026): Rio Bonito ate 269m (poco 1-BN-1-SC), Palermo ~100m
+# (ESTIMATIVA -- nao confirmada), Irati 40-70m (uso 55m), Serra Alta 52-100m
+# na borda leste (uso 80m), Teresina 300-400m na borda leste (uso 350m).
+# Mesmos valores/cores de ../visualizacao_web/gerar_visualizador_3d.py.
+NOMES_CAMADAS = ["Teresina", "Serra Alta", "Irati", "Palermo", "Rio Bonito"]
+CORES_CAMADAS = ["#D6C79A", "#8C8C86", "#3E362C", "#B5AE93", "#C9A66B"]
+PROFUNDIDADE_CAMADAS = [0.0, 350.0, 430.0, 485.0, 585.0, 854.0]
+
+# trend regional: plano bruto do contato real Teresina/Serra Alta (CPRM,
+# n=627) -- ver ../../2_Banco_de_Dados/scripts_etl/calcular_trend_regional_camadas.py
+# e o comentario equivalente em gerar_visualizador_3d.py.
+TREND_A, TREND_B = 0.01034, -0.00025
+TREND_X0, TREND_Y0 = 592300.0, 7015058.8
+Z_REF_TILT = 1053.5  # ancora o plano em boundary(prof=350) = 703.5 (media real do contato Teresina/Serra Alta)
+COR_SILL = "#A63D2F"
+COR_DIQUE = "#2B2B2B"
+COR_QUATERNARIO = "#D9CB82"
+ESPESSURA_SILL = 400.0
+QUATERNARIO_LIMIAR = 450.0
+QUATERNARIO_ESPESSURA = 30.0
+BASE_Z_ABSOLUTA = -600.0  # piso do "cubao" -- rebaixado pra caber a espessura real das 5 formacoes
+
+CORES_HIPSOMETRICAS = ["#A66A2C", "#C6924A", "#D8C88C", "#9FC1A3", "#4F9AA8"]
+COLORSCALE_HIPSOMETRICO = [[i / (len(CORES_HIPSOMETRICAS) - 1), cor] for i, cor in enumerate(CORES_HIPSOMETRICAS)]
+
+# mapa geologico real (CPRM) como alternativa a hipsometria no mapa em planta
+# -- mesmos poligonos/paleta de ../visualizacao_web/gerar_visualizador_3d.py
+# (gerados por ../../2_Banco_de_Dados/scripts_etl/exportar_poligonos_cprm.py).
+# Aqui e so contorno 2D (fill="toself" do Scatter), sem drapeado/triangulacao
+# -- o mapa em planta nao tem relevo 3D pra seguir.
+ORDEM_FORMACOES = NOMES_CAMADAS + [
+    "Serra Geral (sill/dique)", "Aluvião quaternário", "K_TPS_SILL", "K_TPS_DIQUE", "Outros",
+]
+CORES_FORMACOES = CORES_CAMADAS + ["#A63D2F", "#D9CB82", COR_SILL, COR_DIQUE, "#CCCCCC"]
+CORES_FORMACOES_MAPA = dict(zip(ORDEM_FORMACOES, CORES_FORMACOES))
+
+
+def montar_elevador():
+    xyz = np.load(TOPO_NPY)
+    linear = LinearNDInterpolator(xyz[:, :2], xyz[:, 2])
+    nearest = NearestNDInterpolator(xyz[:, :2], xyz[:, 2])
+
+    def elevacao(x, y):
+        z = linear(x, y)
+        if np.isnan(z):
+            z = nearest(x, y)
+        return float(z)
+
+    return elevacao, xyz
+
+
+def faixas_contiguas(mask):
+    """Lista de (i0,i1) pra cada trecho CONTIGUO de True em mask -- um corpo
+    (sill/dique/quaternario) pode cruzar a linha em varios pontos separados
+    (16 diques hoje, nao mais so 2), entao nao da pra so pegar do primeiro
+    ao ultimo True (isso conectava pontos bem distantes com um bloco solido
+    gigante e falso preenchendo os vazios no meio -- bug real, achado
+    testando a secao com o dado atualizado)."""
+    faixas = []
+    inicio = None
+    for i, v in enumerate(mask):
+        if v and inicio is None:
+            inicio = i
+        elif not v and inicio is not None:
+            faixas.append((inicio, i))
+            inicio = None
+    if inicio is not None:
+        faixas.append((inicio, len(mask)))
+    return faixas
+
+
+def banda_toself(dists, topo, base, mask=None):
+    if mask is not None:
+        faixas = faixas_contiguas(mask)
+        if not faixas:
+            return np.array([np.nan]), np.array([np.nan])
+        xs, ys = [], []
+        for k, (i0, i1) in enumerate(faixas):
+            if k > 0:
+                xs.append(np.nan)
+                ys.append(np.nan)
+            d, t, b = dists[i0:i1], topo[i0:i1], base[i0:i1]
+            xs.extend(np.concatenate([d, d[::-1]]))
+            ys.extend(np.concatenate([t, b[::-1]]))
+        return np.array(xs), np.array(ys)
+    x = np.concatenate([dists, dists[::-1]])
+    y = np.concatenate([topo, base[::-1]])
+    return x, y
+
+
+def poligono_para_scatter_xy(geom):
+    """Contorno de um poligono/multipoligono (COM buracos) como x,y pra um
+    Scatter com fill='toself' -- cada anel (exterior + buracos) vira um
+    sub-caminho separado por NaN. Os buracos so viram buraco de verdade se
+    o anel externo e os internos girarem em sentidos opostos (regra
+    "nonzero" do preenchimento do Plotly) -- por isso usa shapely.orient()
+    pra forcar essa convencao, independente de como veio no shapefile.
+    Sem isso, formacoes com buraco (ex.: Teresina/Serra Alta/Rio Bonito, que
+    tem sill/dique "por dentro") ficavam com o buraco preenchido solido,
+    cobrindo o que devia aparecer por baixo."""
+    partes = geom.geoms if hasattr(geom, "geoms") else [geom]
+    xs, ys = [], []
+    primeiro = True
+    for parte in partes:
+        parte = orient(parte, sign=1.0)
+        for anel in [parte.exterior] + list(parte.interiors):
+            if not primeiro:
+                xs.append(np.nan)
+                ys.append(np.nan)
+            primeiro = False
+            coords = np.array(anel.coords)
+            xs.extend(coords[:, 0])
+            ys.extend(coords[:, 1])
+    return np.array(xs), np.array(ys)
+
+
+def poligono_quaternario_mapa(mx, my, mz):
+    """Poligoniza a mascara do deposito quaternario (mesmo limiar/fonte real
+    da secao -- QUATERNARIO_LIMIAR sobre a topografia real) na resolucao da
+    grade do mapa (mx,my,mz), pra desenhar no mapa em planta junto com o
+    resto do mapa geologico (a CPRM/litologia nao mapeia aluviao dentro
+    dessa extensao -- fica de fora do geojson -- entao usa a mesma logica
+    ja usada na secao, nao um dado novo)."""
+    mask = (mz <= QUATERNARIO_LIMIAR)
+    if not mask.any():
+        return None
+    n_y, n_x = mask.shape
+    dx = (X_MAX - X_MIN) / (n_x - 1)
+    dy = (Y_MAX - Y_MIN) / (n_y - 1)
+    transform = Affine.translation(X_MIN - dx / 2, Y_MIN - dy / 2) * Affine.scale(dx, dy)
+    formas = rasterio.features.shapes(mask.astype(np.uint8), mask=mask, transform=transform)
+    poligonos = [shapely_shape(geom) for geom, valor in formas if valor == 1]
+    if not poligonos:
+        return None
+    return unary_union(poligonos)
+
+
+def cobertura_bbox(vx, vy, cx, cy, fator=1.0):
+    """Projeta os 4 cantos do bbox do modelo no vetor (vx,vy) -- da o
+    intervalo [min,max] que cobre a extensao inteira nessa direcao,
+    qualquer que seja o angulo. fator<1 encolhe o intervalo em torno do
+    centro (usado no deslocamento perpendicular -- as pontas do bbox
+    projetado ficam com so uma lasca de terreno, pouco uteis no slider)."""
+    cantos = [(X_MIN, Y_MIN), (X_MIN, Y_MAX), (X_MAX, Y_MIN), (X_MAX, Y_MAX)]
+    projs = [(x - cx) * vx + (y - cy) * vy for x, y in cantos]
+    lo, hi = min(projs), max(projs)
+    if fator != 1.0:
+        centro, meia = (lo + hi) / 2, (hi - lo) / 2 * fator
+        lo, hi = centro - meia, centro + meia
+    return lo, hi
+
+
+def amostrar_linha(cx_linha, cy_linha, dx, dy, s_vals, elevacao, sill_geom, dique_geom):
+    xs = cx_linha + s_vals * dx
+    ys = cy_linha + s_vals * dy
+    dists = (s_vals - s_vals[0]) / 1000
+    terreno = np.array([elevacao(x, y) for x, y in zip(xs, ys)])
+    dentro_sill = np.array([sill_geom.contains(Point(x, y)) for x, y in zip(xs, ys)])
+    dentro_dique = np.array([dique_geom.contains(Point(x, y)) for x, y in zip(xs, ys)])
+
+    # contato 0 = sempre o relevo real (Teresina afloraria sempre no seu
+    # lugar); contatos > 0 sao planos inclinados, erodidos pelo relevo real
+    # onde ficam acima dele (ver comentario equivalente em gerar_visualizador_3d.py).
+    tilt = Z_REF_TILT + TREND_A * (xs - TREND_X0) + TREND_B * (ys - TREND_Y0)
+    contatos = [terreno if m == 0 else np.minimum(tilt - PROFUNDIDADE_CAMADAS[m], terreno)
+                for m in range(len(PROFUNDIDADE_CAMADAS))]
+
+    dados = {}
+    espessuras = []
+    for k in range(len(PROFUNDIDADE_CAMADAS) - 1):
+        dados[f"camada{k}"] = banda_toself(dists, contatos[k], contatos[k + 1])
+        espessuras.append(float(np.mean(contatos[k] - contatos[k + 1])))  # media ao longo da linha (m)
+    dados["espessuras"] = espessuras
+
+    dados["quaternario"] = banda_toself(dists, terreno, terreno - QUATERNARIO_ESPESSURA, terreno <= QUATERNARIO_LIMIAR)
+    dados["sill"] = banda_toself(dists, terreno, terreno - ESPESSURA_SILL, dentro_sill)
+    dados["dique"] = banda_toself(dists, terreno, np.full_like(terreno, BASE_Z_ABSOLUTA), dentro_dique)
+    dados["terreno"] = (dists, terreno)
+    dados["linha_mapa"] = (np.array([xs[0], xs[-1]]), np.array([ys[0], ys[-1]]))
+    return dados
+
+
+_CHAVES_CAMADAS = [f"camada{k}" for k in range(len(PROFUNDIDADE_CAMADAS) - 1)]
+ORDEM_TRACES = ["linha_mapa"] + _CHAVES_CAMADAS + ["quaternario", "sill", "dique", "terreno"]
+CORES_TRACES = {chave: CORES_CAMADAS[k] for k, chave in enumerate(_CHAVES_CAMADAS)}
+CORES_TRACES.update({"quaternario": COR_QUATERNARIO, "sill": COR_SILL, "dique": COR_DIQUE})
+NOMES_TRACES = {chave: NOMES_CAMADAS[k] for k, chave in enumerate(_CHAVES_CAMADAS)}
+NOMES_TRACES.update({
+    "quaternario": "Depósito quaternário", "sill": "Sill de diabásio", "dique": "Dique de diabásio",
+})
+
+
+def main():
+    elevacao, xyz = montar_elevador()
+    gdf = gpd.read_file(POLIGONO_REFERENCIA)
+    sill_geom = gdf[gdf["tipo"] == "Soleira"].geometry.union_all()
+    dique_geom = gdf[gdf["tipo"] == "Dique"].geometry.union_all()
+
+    print("Montando mapa em planta...")
+    mx, my = np.meshgrid(np.linspace(X_MIN, X_MAX, RESOLUCAO_MAPA), np.linspace(Y_MIN, Y_MAX, RESOLUCAO_MAPA))
+    mz = griddata(xyz[:, :2], xyz[:, 2], (mx, my), method="linear")
+    mz_nearest = griddata(xyz[:, :2], xyz[:, 2], (mx, my), method="nearest")
+    mz = np.where(np.isnan(mz), mz_nearest, mz)
+
+    angulos_info = []
+    for nome, theta_deg in ANGULOS:
+        rad = np.radians(theta_deg)
+        dx, dy = np.cos(rad), np.sin(rad)
+        px, py = -np.sin(rad), np.cos(rad)
+        s_min, s_max = cobertura_bbox(dx, dy, CX, CY)
+        t_min, t_max = cobertura_bbox(px, py, CX, CY)
+        n_pos = int(np.floor((t_max - t_min) / PASSO_POSICAO)) + 1
+        t_vals = t_min + np.arange(n_pos) * PASSO_POSICAO
+        if t_vals[-1] < t_max:
+            t_vals = np.append(t_vals, t_max)  # ultimo passo (pode ser < 1000m) pra cobrir ate a borda
+        angulos_info.append(dict(
+            nome=nome, dx=dx, dy=dy, px=px, py=py,
+            s_vals=np.linspace(s_min, s_max, N_AMOSTRAS),
+            t_vals=t_vals,
+        ))
+
+    print(f"Pre-calculando {len(ANGULOS)} angulos, passo de {PASSO_POSICAO:.0f}m...")
+    todas_secoes = []
+    for info in angulos_info:
+        secoes_angulo = []
+        for t in info["t_vals"]:
+            cx_linha, cy_linha = CX + t * info["px"], CY + t * info["py"]
+            secoes_angulo.append(amostrar_linha(cx_linha, cy_linha, info["dx"], info["dy"], info["s_vals"],
+                                                  elevacao, sill_geom, dique_geom))
+        todas_secoes.append(secoes_angulo)
+
+    n_pos_inicial = len(angulos_info[0]["t_vals"])
+    inicial = todas_secoes[0][n_pos_inicial // 2]
+
+    fig = make_subplots(
+        rows=2, cols=2, column_widths=[0.22, 0.78], row_heights=[0.76, 0.24],
+        horizontal_spacing=0.06, vertical_spacing=0.14,
+        specs=[[{}, {}], [{"colspan": 2}, None]],
+        subplot_titles=("Mapa (clique p/ mover)", "Seção transversal", "Espessura das formações na linha atual"),
+    )
+    for ann in fig.layout.annotations:  # titulos dos subplots -- estiliza pra tema escuro antes de adicionar o resto
+        ann.font = dict(color=MARCA_CINZA_CLARO, size=14, family=MARCA_FONTE)
+
+    fig.add_trace(go.Heatmap(
+        x=mx[0, :], y=my[:, 0], z=mz, colorscale=COLORSCALE_HIPSOMETRICO,
+        showscale=False, hoverinfo="none",  # "skip" tambem exclui o trace do hit-test de clique
+    ), row=1, col=1)
+
+    # poligonos do mapa geologico real (CPRM) no mapa em planta -- logo
+    # depois do heatmap (nao depois da linha do perfil!), senao desenham por
+    # cima da linha tracejada e escondem ela. Comecam invisiveis (modo
+    # padrao = hipsometria). So estatico, nao muda com o corte -- o mapa em
+    # planta mostra a area inteira sempre.
+    idx_geo_mapa_inicio = 1
+    gdf_formacoes = gpd.read_file(POLIGONOS_CPRM_GEOJSON)
+    print(f"Mapa geologico real: {len(gdf_formacoes)} formacoes")
+    for row in gdf_formacoes.itertuples():
+        gx, gy = poligono_para_scatter_xy(row.geometry)
+        fig.add_trace(go.Scatter(
+            x=gx, y=gy, mode="lines", line=dict(width=0), fill="toself",
+            fillcolor=CORES_FORMACOES_MAPA.get(row.formacao, "#CCCCCC"),
+            name=row.formacao, showlegend=False, visible=False, hoverinfo="none",
+        ), row=1, col=1)
+
+    # deposito quaternario tambem no mapa em planta -- a litologia CPRM nao
+    # mapeia aluviao dentro dessa extensao (fica de fora do geojson), entao
+    # poligoniza a MESMA mascara/limiar real ja usada na secao (nao e um
+    # dado novo, so o mesmo proxy representado como poligono).
+    poli_quat = poligono_quaternario_mapa(mx, my, mz)
+    n_geo_mapa = len(gdf_formacoes) + (1 if poli_quat is not None else 0)
+    if poli_quat is not None:
+        gx, gy = poligono_para_scatter_xy(poli_quat)
+        fig.add_trace(go.Scatter(
+            x=gx, y=gy, mode="lines", line=dict(width=0), fill="toself",
+            fillcolor=COR_QUATERNARIO, name="Depósito quaternário",
+            showlegend=False, visible=False, hoverinfo="none",
+        ), row=1, col=1)
+    idx_geo_mapa_fim = idx_geo_mapa_inicio + n_geo_mapa - 1
+
+    idx_trace_terreno = None
+    for chave in ORDEM_TRACES:
+        x, y = inicial[chave]
+        if chave == "linha_mapa":
+            fig.add_trace(go.Scatter(x=x, y=y, mode="lines", line=dict(color="black", width=2, dash="dash"), showlegend=False), row=1, col=1)
+        elif chave == "terreno":
+            idx_trace_terreno = len(fig.data)
+            fig.add_trace(go.Scatter(x=x, y=y, mode="lines", line=dict(color=MARCA_CINZA_CLARO, width=1.5), showlegend=False), row=1, col=2)
+        else:
+            fig.add_trace(go.Scatter(
+                x=x, y=y, mode="lines", line=dict(width=0), fill="toself",
+                fillcolor=CORES_TRACES[chave], name=NOMES_TRACES[chave],
+            ), row=1, col=2)
+
+    # escala grafica + seta norte no mapa em planta -- elementos cartograficos
+    # padrao, adicionados por ULTIMO (depois de todas as traces usadas nos
+    # frames) pra nao interferir nos indices do corte/geologia acima.
+    comprimento_escala = 5000.0  # 5 km
+    esc_x0 = X_MIN + (X_MAX - X_MIN) * 0.05
+    esc_x1 = esc_x0 + comprimento_escala
+    esc_y = Y_MIN + (Y_MAX - Y_MIN) * 0.04
+    tick = (Y_MAX - Y_MIN) * 0.012
+    esc_x_lista = [esc_x0, esc_x0, None, esc_x0, esc_x1, None, esc_x1, esc_x1]
+    esc_y_lista = [esc_y - tick, esc_y + tick, None, esc_y, esc_y, None, esc_y - tick, esc_y + tick]
+    # preto com contorno branco (linha branca mais grossa por baixo) -- fica
+    # legivel em qualquer parte do mapa, seja hipsometria ou geologia.
+    fig.add_trace(go.Scatter(
+        x=esc_x_lista, y=esc_y_lista, mode="lines", line=dict(color="white", width=5),
+        showlegend=False, hoverinfo="none",
+    ), row=1, col=1)
+    fig.add_trace(go.Scatter(
+        x=esc_x_lista, y=esc_y_lista, mode="lines", line=dict(color="black", width=2),
+        showlegend=False, hoverinfo="none",
+    ), row=1, col=1)
+    fig.add_annotation(
+        x=(esc_x0 + esc_x1) / 2, y=esc_y + (Y_MAX - Y_MIN) * 0.03, xref="x", yref="y",
+        text=f"{comprimento_escala / 1000:.0f} km", showarrow=False,
+        font=dict(size=11, color="black"), xanchor="center",
+    )
+
+    norte_x = X_MAX - (X_MAX - X_MIN) * 0.10
+    norte_y0 = Y_MAX - (Y_MAX - Y_MIN) * 0.24
+    norte_y1 = Y_MAX - (Y_MAX - Y_MIN) * 0.13
+    fig.add_annotation(
+        x=norte_x, y=norte_y1, ax=norte_x, ay=norte_y0, xref="x", yref="y", axref="x", ayref="y",
+        showarrow=True, arrowhead=2, arrowsize=1.2, arrowwidth=2, arrowcolor="black", text="",
+    )
+    fig.add_annotation(
+        x=norte_x, y=norte_y1 + (Y_MAX - Y_MIN) * 0.025, xref="x", yref="y",
+        text="N", showarrow=False, font=dict(size=13, color="black"),
+    )
+
+    # direcao real (O/L/S/N/etc.) nas pontas da secao transversal -- extraida
+    # do nome do angulo ("Horizontal (O↔L)" -> "O" na ponta esquerda/dists=0,
+    # "L" na direita/dists=comprimento). Atualiza via JS quando o angulo muda
+    # (irParaAngulo), igual o range do eixo X.
+    def extrair_direcoes(nome):
+        miolo = nome.split("(")[1].rstrip(")")
+        return miolo.split("↔")
+    y_direcao = 1100.0  # perto do topo do eixo Y da secao (range ate 1150)
+    comprimento0_km = (angulos_info[0]["s_vals"][-1] - angulos_info[0]["s_vals"][0]) / 1000
+    dir0_inicial, dir1_inicial = extrair_direcoes(ANGULOS[0][0])
+    idx_anotacao_dir0 = len(fig.layout.annotations)
+    fig.add_annotation(
+        x=0, y=y_direcao, xref="x2", yref="y2", text=dir0_inicial, showarrow=False,
+        font=dict(size=13, color=MARCA_CINZA_CLARO), xanchor="left",
+    )
+    idx_anotacao_dir1 = len(fig.layout.annotations)
+    fig.add_annotation(
+        x=comprimento0_km, y=y_direcao, xref="x2", yref="y2", text=dir1_inicial, showarrow=False,
+        font=dict(size=13, color=MARCA_CINZA_CLARO), xanchor="right",
+    )
+
+    n_traces_fixas = 1 + n_geo_mapa  # heatmap + poligonos de geologia (+ quaternario) -- nao mudam entre frames
+    frames = []
+    for a, secoes_angulo in enumerate(todas_secoes):
+        for p, secao in enumerate(secoes_angulo):
+            dados_frame = [go.Scatter(x=secao[chave][0], y=secao[chave][1]) for chave in ORDEM_TRACES]
+            frames.append(go.Frame(
+                data=dados_frame, name=f"{a}_{p}",
+                traces=list(range(n_traces_fixas, n_traces_fixas + len(ORDEM_TRACES))),
+            ))
+    fig.frames = frames
+
+    # grafico de barras da espessura das formacoes na linha atual (em vez de
+    # so texto -- mais facil de comparar magnitude entre as 5 formacoes,
+    # bar chart e a escolha certa aqui pq sao valores em metros comparaveis,
+    # nao proporcao de um todo tipo pizza). Atualizado via JS (Plotly.restyle
+    # em y/text) quando o angulo/posicao muda -- nao faz parte do sistema de
+    # frames do corte, e uma trace fixa a parte.
+    idx_trace_barra = len(fig.data)
+    fig.add_trace(go.Bar(
+        x=NOMES_CAMADAS, y=inicial["espessuras"], marker_color=CORES_CAMADAS,
+        marker_line=dict(color=MARCA_ROXO, width=1),
+        text=[f"{e:.0f}m" for e in inicial["espessuras"]], textposition="outside",
+        textfont=dict(color=MARCA_CINZA_CLARO), showlegend=False, hoverinfo="none",
+    ), row=2, col=1)
+
+    COR_PAINEL = "#3A3A46"  # fundo cinza dos graficos (secao + barras), diferente do navy da pagina -- mais facil de ler
+    eixo_escuro = dict(gridcolor="#54545f", zerolinecolor="#6a6a75", color=MARCA_CINZA_CLARO)
+    fig.update_xaxes(showticklabels=False, row=1, col=1, range=[X_MIN, X_MAX], scaleanchor="y1", scaleratio=1, constrain="domain")
+    fig.update_yaxes(showticklabels=False, row=1, col=1, range=[Y_MIN, Y_MAX], constrain="domain")
+    comprimento0_km = (angulos_info[0]["s_vals"][-1] - angulos_info[0]["s_vals"][0]) / 1000
+    fig.update_xaxes(title_text="Distância ao longo da seção (km)", row=1, col=2, range=[0, comprimento0_km], **eixo_escuro)
+    fig.update_yaxes(title_text="Elevação (m)", row=1, col=2, range=[-600, 1150], **eixo_escuro)
+    fig.update_xaxes(row=2, col=1, **eixo_escuro)
+    fig.update_yaxes(title_text="Espessura (m)", row=2, col=1, range=[0, 400], **eixo_escuro)
+
+    fig.update_layout(
+        title=dict(
+            text="<b>Modelo 3D Taió Plumbing System</b> — Seção transversal interativa",
+            font=dict(family=MARCA_FONTE, size=24, color=MARCA_CINZA_CLARO),
+            x=0.03, xanchor="left",
+        ),
+        paper_bgcolor=MARCA_NAVY, plot_bgcolor=COR_PAINEL,
+        font=dict(family=MARCA_FONTE, color=MARCA_CINZA_CLARO),
+        height=840,
+        legend=dict(x=1.01, y=0.94, bgcolor="rgba(45,10,74,0.75)", bordercolor=MARCA_ROXO, borderwidth=1,
+                    font=dict(color=MARCA_CINZA_CLARO)),
+        margin=dict(l=50, r=180, t=70, b=200),
+        updatemenus=[
+            dict(
+                type="buttons", direction="left", showactive=False,
+                x=0.5, y=-0.42, xanchor="center", yanchor="top",
+                bgcolor=MARCA_ROXO_ESCURO, bordercolor=MARCA_ROXO, borderwidth=1.5,
+                font=dict(color=MARCA_CINZA_CLARO, family=MARCA_FONTE),
+                buttons=[dict(label=nome, method="skip") for nome, _ in ANGULOS] + [
+                    dict(label="Mapa: Hipsometria", method="restyle",
+                         args=[{"visible": [True] + [False] * n_geo_mapa}, [0] + list(range(idx_geo_mapa_inicio, idx_geo_mapa_fim + 1))]),
+                    dict(label="Mapa: Geologia (CPRM real)", method="restyle",
+                         args=[{"visible": [False] + [True] * n_geo_mapa}, [0] + list(range(idx_geo_mapa_inicio, idx_geo_mapa_fim + 1))]),
+                    dict(label="Tema: Escuro", method="skip"),
+                    dict(label="Tema: Claro", method="skip"),
+                ],
+            ),
+        ],
+        sliders=[dict(
+            active=n_pos_inicial // 2,
+            currentvalue=dict(prefix="Deslocamento perpendicular ao corte: ", font=dict(color=MARCA_CINZA_CLARO)),
+            pad=dict(t=30),
+            bgcolor=MARCA_ROXO_ESCURO, activebgcolor=MARCA_ROXO, bordercolor=MARCA_ROXO,
+            font=dict(color=MARCA_CINZA_CLARO, family=MARCA_FONTE),
+            steps=[
+                dict(
+                    method="animate",
+                    args=[[f"0_{p}"], dict(mode="immediate", frame=dict(duration=0, redraw=True), transition=dict(duration=0))],
+                    label=f"{angulos_info[0]['t_vals'][p]:+.0f} m",
+                )
+                for p in range(n_pos_inicial)
+            ],
+        )],
+    )
+
+    angulos_js = ",\n        ".join(
+        "{dx:%.6f, dy:%.6f, px:%.6f, py:%.6f, compKm:%.3f, dir0:'%s', dir1:'%s', t:[%s]}" % (
+            info["dx"], info["dy"], info["px"], info["py"],
+            (info["s_vals"][-1] - info["s_vals"][0]) / 1000,
+            *extrair_direcoes(info["nome"]),
+            ",".join(f"{t:.2f}" for t in info["t_vals"]),
+        )
+        for info in angulos_info
+    )
+    espessuras_js = ",\n        ".join(
+        "[" + ",\n         ".join("[" + ",".join(f"{e:.1f}" for e in secao["espessuras"]) + "]" for secao in secoes_angulo) + "]"
+        for secoes_angulo in todas_secoes
+    )
+    nomes_camadas_js = ",".join(f"'{nome}'" for nome in NOMES_CAMADAS)
+    logo_b64 = logo_base64()
+    marca_html = f"""
+    (function() {{
+        var style = document.createElement('style');
+        style.textContent = 'body {{ background: {MARCA_NAVY}; margin: 0; }}';
+        document.head.appendChild(style);
+        var logo = document.createElement('img');
+        logo.src = 'data:image/jpeg;base64,{logo_b64}';
+        logo.style.cssText = 'position:fixed; top:14px; right:18px; width:64px; height:64px; ' +
+            'border-radius:50%; border:2px solid {MARCA_ROXO}; box-shadow:0 0 10px rgba(123,47,255,0.6); z-index:1000;';
+        document.body.appendChild(logo);
+        var atribuicao = document.createElement('div');
+        atribuicao.textContent = 'Criado por Afonso Henrique de Jesus';
+        atribuicao.style.cssText = 'position:fixed; bottom:6px; left:14px; color:{MARCA_CINZA_CLARO}; ' +
+            'opacity:0.55; font-family:{MARCA_FONTE}; font-size:11px; z-index:1000;';
+        document.body.appendChild(atribuicao);
+    }})();
+    """ if logo_b64 else ""
+
+    post_script = f"""
+    {marca_html}
+    (function() {{
+        var CX = {CX}, CY = {CY};
+        var ANGULOS = [
+        {angulos_js}
+        ];
+        var ESPESSURAS = [
+        {espessuras_js}
+        ];
+        var NOMES_CAMADAS = [{nomes_camadas_js}];
+        var IDX_TRACE_BARRA = {idx_trace_barra};
+        var IDX_TRACE_TERRENO = {idx_trace_terreno};
+        var IDX_ANOTACAO_DIR0 = {idx_anotacao_dir0};
+        var IDX_ANOTACAO_DIR1 = {idx_anotacao_dir1};
+        var IDX_ANOTACOES_SUBTITULO = [0, 1, 2];
+        var anguloAtual = 0;
+        var gd = document.getElementsByClassName('plotly-graph-div')[0];
+
+        // tema claro/escuro -- escala/norte ja tem contorno branco+preto
+        // (nao muda com o tema), heatmap/geologia/camadas/sill/dique tem
+        // cor propria (nao muda). So a "moldura" (fundo, grade, texto).
+        var TEMA = {{
+            escuro: {{
+                paper: '{MARCA_NAVY}', painel: '{COR_PAINEL}', texto: '{MARCA_CINZA_CLARO}',
+                grid: '#54545f', zerogrid: '#6a6a75', legendBg: 'rgba(45,10,74,0.75)',
+                botaoBg: '{MARCA_ROXO_ESCURO}',
+            }},
+            claro: {{
+                paper: '{MARCA_CINZA_CLARO}', painel: '#FFFFFF', texto: '{MARCA_NAVY}',
+                grid: '#D0D0D8', zerogrid: '#B8B8C4', legendBg: 'rgba(255,255,255,0.85)',
+                botaoBg: '#EDE3FF',
+            }},
+        }};
+
+        function aplicarTema(nome) {{
+            var t = TEMA[nome];
+            var patch = {{
+                paper_bgcolor: t.paper, plot_bgcolor: t.painel,
+                'font.color': t.texto,
+                'legend.bgcolor': t.legendBg, 'legend.font.color': t.texto,
+                'title.font.color': t.texto,
+                'updatemenus[0].bgcolor': t.botaoBg, 'updatemenus[0].font.color': t.texto,
+                'sliders[0].bgcolor': t.botaoBg, 'sliders[0].font.color': t.texto,
+                'sliders[0].currentvalue.font.color': t.texto,
+                'xaxis2.color': t.texto, 'xaxis2.gridcolor': t.grid, 'xaxis2.zerolinecolor': t.zerogrid,
+                'yaxis2.color': t.texto, 'yaxis2.gridcolor': t.grid, 'yaxis2.zerolinecolor': t.zerogrid,
+                'xaxis3.color': t.texto, 'xaxis3.gridcolor': t.grid, 'xaxis3.zerolinecolor': t.zerogrid,
+                'yaxis3.color': t.texto, 'yaxis3.gridcolor': t.grid, 'yaxis3.zerolinecolor': t.zerogrid,
+            }};
+            IDX_ANOTACOES_SUBTITULO.concat([IDX_ANOTACAO_DIR0, IDX_ANOTACAO_DIR1]).forEach(function(idx) {{
+                patch['annotations[' + idx + '].font.color'] = t.texto;
+            }});
+            Plotly.relayout(gd, patch);
+            Plotly.restyle(gd, {{'line.color': t.texto}}, [IDX_TRACE_TERRENO]);
+            Plotly.restyle(gd, {{'textfont.color': t.texto}}, [IDX_TRACE_BARRA]);
+            document.body.style.background = t.paper;
+        }}
+
+        function atualizarEspessuras(a, p) {{
+            var vals = ESPESSURAS[a][p];
+            var rotulos = vals.map(function(v) {{ return Math.round(v) + 'm'; }});
+            Plotly.restyle(gd, {{y: [vals], text: [rotulos]}}, [IDX_TRACE_BARRA]);
+        }}
+
+        // forca o estado inicial (posicao central) -- o slider as vezes
+        // "deriva" pro ultimo step sozinho no load (comportamento estranho
+        // do Plotly com varios steps sem "value" explicito).
+        var posMeioInicial = {n_pos_inicial // 2};
+        Plotly.animate(gd, ['0_' + posMeioInicial], {{mode: 'immediate', frame: {{duration: 0, redraw: true}}, transition: {{duration: 0}}}});
+        Plotly.relayout(gd, {{'sliders[0].active': posMeioInicial}});
+        atualizarEspessuras(0, posMeioInicial);
+
+        function stepsParaAngulo(a) {{
+            var info = ANGULOS[a];
+            var steps = [];
+            for (var p = 0; p < info.t.length; p++) {{
+                var rotulo = (info.t[p] >= 0 ? '+' : '') + info.t[p].toFixed(0) + ' m';
+                steps.push({{
+                    method: 'animate',
+                    args: [[a + '_' + p], {{mode: 'immediate', frame: {{duration: 0, redraw: true}}, transition: {{duration: 0}}}}],
+                    label: rotulo,
+                }});
+            }}
+            return steps;
+        }}
+
+        function irParaAngulo(a) {{
+            anguloAtual = a;
+            var posMeio = Math.floor(ANGULOS[a].t.length / 2);
+            var patch = {{
+                'sliders[0].steps': stepsParaAngulo(a),
+                'sliders[0].active': posMeio,
+                'xaxis2.range': [0, ANGULOS[a].compKm],
+            }};
+            patch['annotations[' + IDX_ANOTACAO_DIR0 + '].text'] = ANGULOS[a].dir0;
+            patch['annotations[' + IDX_ANOTACAO_DIR1 + '].x'] = ANGULOS[a].compKm;
+            patch['annotations[' + IDX_ANOTACAO_DIR1 + '].text'] = ANGULOS[a].dir1;
+            Plotly.relayout(gd, patch);
+            Plotly.animate(gd, [a + '_' + posMeio], {{
+                mode: 'immediate', frame: {{duration: 0, redraw: true}}, transition: {{duration: 0}},
+            }});
+            atualizarEspessuras(a, posMeio);
+        }}
+
+        gd.on('plotly_buttonclicked', function(ev) {{
+            if (typeof ev.active !== 'number') return;
+            if (ev.active < ANGULOS.length) {{
+                irParaAngulo(ev.active);
+            }} else if (ev.active === ANGULOS.length + 2) {{
+                aplicarTema('escuro');
+            }} else if (ev.active === ANGULOS.length + 3) {{
+                aplicarTema('claro');
+            }}
+            // botoes "Mapa: Hipsometria/Geologia" (ANGULOS.length, +1) usam
+            // method='restyle' proprio, nao precisam de JS aqui.
+        }});
+
+        // slider arrastado direto (nao via botao/clique) tambem atualiza a
+        // espessura -- setTimeout deixa o Plotly terminar de aplicar o novo
+        // "active" antes de ler.
+        gd.on('plotly_sliderchange', function() {{
+            setTimeout(function() {{ atualizarEspessuras(anguloAtual, gd.layout.sliders[0].active); }}, 0);
+        }});
+
+        gd.on('plotly_click', function(data) {{
+            var ponto = data.points[0];
+            var ehMapa = ponto.curveNumber === 0 || (ponto.curveNumber >= {idx_geo_mapa_inicio} && ponto.curveNumber <= {idx_geo_mapa_fim});
+            if (!ehMapa) return;  // so reage a clique no mapa (heatmap ou poligonos de geologia)
+            var info = ANGULOS[anguloAtual];
+            var t = (ponto.x - CX) * info.px + (ponto.y - CY) * info.py;
+            var melhorIdx = 0, melhorDist = Infinity;
+            for (var p = 0; p < info.t.length; p++) {{
+                var d = Math.abs(info.t[p] - t);
+                if (d < melhorDist) {{ melhorDist = d; melhorIdx = p; }}
+            }}
+            Plotly.relayout(gd, {{'sliders[0].active': melhorIdx}});
+            Plotly.animate(gd, [anguloAtual + '_' + melhorIdx], {{
+                mode: 'immediate', frame: {{duration: 0, redraw: true}}, transition: {{duration: 0}},
+            }});
+            atualizarEspessuras(anguloAtual, melhorIdx);
+        }});
+    }})();
+    """
+
+    fig.write_html(str(OUT_HTML), include_plotlyjs="inline", full_html=True, post_script=post_script)
+    print(f"Salvo em: {OUT_HTML}")
+
+
+if __name__ == "__main__":
+    main()

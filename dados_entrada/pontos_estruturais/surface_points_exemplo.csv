@@ -1,0 +1,13 @@
+X,Y,Z,formation
+100,100,50,sill_principal
+500,100,30,sill_principal
+900,100,10,sill_principal
+100,900,60,sill_principal
+500,900,20,sill_principal
+900,900,-10,sill_principal
+100,100,-100,contato_encaixante
+500,100,-150,contato_encaixante
+900,100,-200,contato_encaixante
+100,900,-80,contato_encaixante
+500,900,-130,contato_encaixante
+900,900,-180,contato_encaixante
