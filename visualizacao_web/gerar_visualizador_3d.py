@@ -49,7 +49,7 @@ def logo_base64():
         return None
     return base64.b64encode(LOGO_PATH.read_bytes()).decode("ascii")
 
-RESOLUCAO_GRID_TOPO = 80  # pontos por eixo, so para o render (nao afeta o GemPy) -- baixado de 250, depois 110/95.
+RESOLUCAO_GRID_TOPO = 70  # pontos por eixo, so para o render (nao afeta o GemPy) -- baixado de 250, depois 110/95/80/75.
 # Precisou cair mais quando a ferramenta de corte ganhou 4 modos (2 eixos x 2 direcoes, ver
 # MODOS_CORTE) -- cada frame de corte carrega o estado inteiro (topografia+camadas+corpos+
 # decalques), entao 4 modos x N_CORTE posicoes multiplica o arquivo rapido; sem baixar a
@@ -59,8 +59,13 @@ EXAGERO_Z = 6.0  # fator de exagero vertical (relevo real e sutil frente a area 
 BASE_Z_ABSOLUTA = -600.0  # piso do "cubao" -- mesma cota usada em ../scripts/06_gerar_solidos_estilizados_cubao.py
 COR_SILL, COR_DIQUE = "#A63D2F", "#2B2B2B"  # paleta exata
 ESPESSURA_SILL_ESTILIZADA = 400.0  # mesma de ../scripts/06_gerar_solidos_estilizados_cubao.py
-PASSO_DENSIFICACAO = 40.0  # mesma de ../scripts/06_gerar_solidos_estilizados_cubao.py
-PASSO_INTERIOR_DECAL = 750.0  # grade de pontos internos pros decalques geologicos (evita
+PASSO_DENSIFICACAO = 40.0  # mesma de ../scripts/06_gerar_solidos_estilizados_cubao.py -- so
+# pro CORPO SOLIDO do sill/dique (construir_solido), mantido fino de proposito: e o dado
+# cientifico mais importante sempre visivel. NAO usar pro decalque (ver PASSO_DENSIFICACAO_DECAL).
+PASSO_DENSIFICACAO_DECAL = 70.0  # contorno do decalque geologico (so cor/aparencia, nao a forma
+# real do corpo) -- mais grosso que PASSO_DENSIFICACAO de proposito, e o maior custo restante
+# por frame de corte (ver historico de reducao de tamanho no CLAUDE.md).
+PASSO_INTERIOR_DECAL = 2100.0  # grade de pontos internos pros decalques geologicos (evita
 # facetas gigantes/chapadas em poligonos grandes -- ver triangular_interior). Mesma ordem
 # de grandeza da resolucao da grade da topografia, sem exagerar o numero de triangulos.
 
@@ -71,7 +76,7 @@ PASSO_INTERIOR_DECAL = 750.0  # grade de pontos internos pros decalques geologic
 # "paredes_caixa" ja desenha a sequencia estratigrafica inteira em qualquer
 # borda da grade, a nova borda cortada vira automaticamente a face exposta
 # (corte reto mostrando as camadas por dentro).
-N_CORTE = 9
+N_CORTE = 13
 J_MIN_CORTE = 12  # minimo de colunas/linhas mantidas (evita um bloco degenerado no extremo)
 
 # 5 formacoes sedimentares REAIS (Bacia do Parana, Grupo Guata/Passa Dois),
@@ -284,7 +289,7 @@ def construir_decal_plano(poligono, elevacao_fn):
     (OFFSET_DECAL_Z) pra nao dar z-fighting com a topografia -- "decalque"
     vetorial do mapa geologico real, nao uma amostragem em grade (ver
     comentario em ORDEM_FORMACOES)."""
-    pontos_xy, triangulos = triangular_interior(poligono, PASSO_DENSIFICACAO, PASSO_INTERIOR_DECAL)
+    pontos_xy, triangulos = triangular_interior(poligono, PASSO_DENSIFICACAO_DECAL, PASSO_INTERIOR_DECAL)
     if len(triangulos) == 0:
         return np.zeros((0, 3)), np.zeros((0, 3), dtype=int)
     z = np.array([elevacao_fn(x, y) for x, y in pontos_xy]) + OFFSET_DECAL_Z
