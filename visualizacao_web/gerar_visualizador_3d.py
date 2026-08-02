@@ -49,14 +49,18 @@ def logo_base64():
         return None
     return base64.b64encode(LOGO_PATH.read_bytes()).decode("ascii")
 
-RESOLUCAO_GRID_TOPO = 110  # pontos por eixo, so para o render (nao afeta o GemPy) -- baixado de 250
+RESOLUCAO_GRID_TOPO = 80  # pontos por eixo, so para o render (nao afeta o GemPy) -- baixado de 250, depois 110/95.
+# Precisou cair mais quando a ferramenta de corte ganhou 4 modos (2 eixos x 2 direcoes, ver
+# MODOS_CORTE) -- cada frame de corte carrega o estado inteiro (topografia+camadas+corpos+
+# decalques), entao 4 modos x N_CORTE posicoes multiplica o arquivo rapido; sem baixar a
+# resolucao/densidade dos decalques o HTML passava de 100MB (limite do GitHub sem LFS).
 # pra 110 quando a ferramenta de corte (frames por posicao) fez o HTML passar de 400MB
 EXAGERO_Z = 6.0  # fator de exagero vertical (relevo real e sutil frente a area horizontal)
 BASE_Z_ABSOLUTA = -600.0  # piso do "cubao" -- mesma cota usada em ../scripts/06_gerar_solidos_estilizados_cubao.py
 COR_SILL, COR_DIQUE = "#A63D2F", "#2B2B2B"  # paleta exata
 ESPESSURA_SILL_ESTILIZADA = 400.0  # mesma de ../scripts/06_gerar_solidos_estilizados_cubao.py
 PASSO_DENSIFICACAO = 40.0  # mesma de ../scripts/06_gerar_solidos_estilizados_cubao.py
-PASSO_INTERIOR_DECAL = 250.0  # grade de pontos internos pros decalques geologicos (evita
+PASSO_INTERIOR_DECAL = 750.0  # grade de pontos internos pros decalques geologicos (evita
 # facetas gigantes/chapadas em poligonos grandes -- ver triangular_interior). Mesma ordem
 # de grandeza da resolucao da grade da topografia, sem exagerar o numero de triangulos.
 
@@ -67,7 +71,7 @@ PASSO_INTERIOR_DECAL = 250.0  # grade de pontos internos pros decalques geologic
 # "paredes_caixa" ja desenha a sequencia estratigrafica inteira em qualquer
 # borda da grade, a nova borda cortada vira automaticamente a face exposta
 # (corte reto mostrando as camadas por dentro).
-N_CORTE = 8
+N_CORTE = 9
 J_MIN_CORTE = 12  # minimo de colunas/linhas mantidas (evita um bloco degenerado no extremo)
 
 # 5 formacoes sedimentares REAIS (Bacia do Parana, Grupo Guata/Passa Dois),
@@ -238,14 +242,17 @@ def construir_solido(poligono, elevacao_fn, espessura=None, base_absoluta=None):
     return vertices, np.array(faces)
 
 
-def construir_corpo_cortado(gdf_corpo, elevacao_fn, eixo, valor_corte, bbox_amplo, **kwargs):
+def construir_corpo_cortado(gdf_corpo, elevacao_fn, eixo, valor_corte, bbox_amplo, invertido=False, **kwargs):
     """Recorta cada poligono do corpo (sill/dique, pode ter varios lobos) pelo
-    semiplano do corte (mantem X<=valor ou Y<=valor) e extrude cada pedaco
-    resultante -- ao contrario de so filtrar triangulos de uma malha fixa,
-    isso gera uma parede de verdade na aresta do corte (corpo aparece solido/
-    preenchido no corte, nao vazado)."""
+    semiplano do corte (mantem X<=valor ou Y<=valor, ou o lado oposto se
+    invertido=True) e extrude cada pedaco resultante -- ao contrario de so
+    filtrar triangulos de uma malha fixa, isso gera uma parede de verdade na
+    aresta do corte (corpo aparece solido/preenchido no corte, nao vazado)."""
     xmin_a, ymin_a, xmax_a, ymax_a = bbox_amplo
-    caixa = box(xmin_a, ymin_a, valor_corte, ymax_a) if eixo == "x" else box(xmin_a, ymin_a, xmax_a, valor_corte)
+    if eixo == "x":
+        caixa = box(valor_corte, ymin_a, xmax_a, ymax_a) if invertido else box(xmin_a, ymin_a, valor_corte, ymax_a)
+    else:
+        caixa = box(xmin_a, valor_corte, xmax_a, ymax_a) if invertido else box(xmin_a, ymin_a, xmax_a, valor_corte)
 
     todos_v, todos_f = [], []
     offset = 0
@@ -284,11 +291,14 @@ def construir_decal_plano(poligono, elevacao_fn):
     return np.column_stack([pontos_xy, z]), triangulos
 
 
-def construir_decal_cortado(geoms, elevacao_fn, eixo, valor_corte, bbox_amplo):
+def construir_decal_cortado(geoms, elevacao_fn, eixo, valor_corte, bbox_amplo, invertido=False):
     """Mesmo recorte por semiplano de construir_corpo_cortado, mas so o topo
     (decalque plano) -- usado pros poligonos do mapa geologico real."""
     xmin_a, ymin_a, xmax_a, ymax_a = bbox_amplo
-    caixa = box(xmin_a, ymin_a, valor_corte, ymax_a) if eixo == "x" else box(xmin_a, ymin_a, xmax_a, valor_corte)
+    if eixo == "x":
+        caixa = box(valor_corte, ymin_a, xmax_a, ymax_a) if invertido else box(xmin_a, ymin_a, valor_corte, ymax_a)
+    else:
+        caixa = box(xmin_a, valor_corte, xmax_a, ymax_a) if invertido else box(xmin_a, ymin_a, xmax_a, valor_corte)
 
     todos_v, todos_f = [], []
     offset = 0
@@ -315,18 +325,27 @@ def construir_decal_cortado(geoms, elevacao_fn, eixo, valor_corte, bbox_amplo):
     return dict(x=vertices[:, 0], y=vertices[:, 1], z=vertices[:, 2], i=faces[:, 0], j=faces[:, 1], k=faces[:, 2])
 
 
-def montar_estado(eixo, j, grid_x, grid_y, grid_z, grid_contatos, topo_quat, fundo_quat,
+def montar_estado(eixo, j, invertido, grid_x, grid_y, grid_z, grid_contatos, topo_quat, fundo_quat,
                    xs, ys, gdf_sill, gdf_dique, elevacao_fn, bbox_amplo,
                    formacoes_geoms, zmin_hipso, zmax_hipso):
     """Monta os dados (x,y,z / i,j,k) de todas as traces pra um estado de
-    corte -- eixo='x' corta em X (mantem X <= valor), eixo='y' corta em Y
-    (mantem Y <= valor); j = numero de colunas/linhas da grade mantidas."""
+    corte -- eixo='x' corta em X, eixo='y' corta em Y; invertido troca qual
+    lado fica visivel (mantem X<=valor normal / X>=valor invertido, e o
+    equivalente em Y); j = numero de colunas/linhas da grade mantidas."""
     if eixo == "x":
-        cortar = lambda g: g[:, :j]
-        valor_corte = xs[j - 1]
+        if invertido:
+            cortar = lambda g: g[:, -j:]
+            valor_corte = xs[-j]
+        else:
+            cortar = lambda g: g[:, :j]
+            valor_corte = xs[j - 1]
     else:
-        cortar = lambda g: g[:j, :]
-        valor_corte = ys[j - 1]
+        if invertido:
+            cortar = lambda g: g[-j:, :]
+            valor_corte = ys[-j]
+        else:
+            cortar = lambda g: g[:j, :]
+            valor_corte = ys[j - 1]
 
     gx, gy, gz = cortar(grid_x), cortar(grid_y), cortar(grid_z)
     dados = {
@@ -346,13 +365,13 @@ def montar_estado(eixo, j, grid_x, grid_y, grid_z, grid_contatos, topo_quat, fun
     dados["quaternario_fundo"] = dict(x=gx, y=gy, z=cortar(fundo_quat))
 
     dados["sill"] = construir_corpo_cortado(gdf_sill, elevacao_fn, eixo, valor_corte, bbox_amplo,
-                                              espessura=ESPESSURA_SILL_ESTILIZADA)
+                                              invertido=invertido, espessura=ESPESSURA_SILL_ESTILIZADA)
     dados["dique"] = construir_corpo_cortado(gdf_dique, elevacao_fn, eixo, valor_corte, bbox_amplo,
-                                               base_absoluta=BASE_Z_ABSOLUTA)
+                                               invertido=invertido, base_absoluta=BASE_Z_ABSOLUTA)
 
     for nome in ORDEM_FORMACOES:
         dados[f"geo_{nome}"] = construir_decal_cortado(
-            formacoes_geoms.get(nome, []), elevacao_fn, eixo, valor_corte, bbox_amplo)
+            formacoes_geoms.get(nome, []), elevacao_fn, eixo, valor_corte, bbox_amplo, invertido=invertido)
     return dados
 
 
@@ -410,8 +429,8 @@ def main():
     print(f"Mapa geologico real: {len(gdf_formacoes)} formacoes ({', '.join(formacoes_geoms)})")
     zmin_hipso, zmax_hipso = float(grid_z.min()), float(grid_z.max())
 
-    def montar(eixo, j):
-        return montar_estado(eixo, j, grid_x, grid_y, grid_z, grid_contatos, topo_quat, fundo_quat,
+    def montar(eixo, j, invertido=False):
+        return montar_estado(eixo, j, invertido, grid_x, grid_y, grid_z, grid_contatos, topo_quat, fundo_quat,
                               xs, ys, gdf_sill, gdf_dique, elevacao_fn, bbox_amplo,
                               formacoes_geoms, zmin_hipso, zmax_hipso)
 
@@ -484,16 +503,20 @@ def main():
 
     idx_geo_inicio = 1 + len(ORDEM_TRACES_RESTO) - len(CHAVES_GEO)  # indice da 1a trace de decalque
 
-    print(f"Pre-calculando ferramenta de corte: 2 eixos x {N_CORTE} posicoes...")
+    # 4 modos de corte: eixo x/y, cada um normal (mantem lado "menor") ou
+    # invertido (mantem lado "maior") -- deixa escolher de qual lado o corte
+    # "entra" (Leste-Oeste/Oeste-Leste, Norte-Sul/Sul-Norte).
+    MODOS_CORTE = [("x", False, "x"), ("x", True, "xinv"), ("y", False, "y"), ("y", True, "yinv")]
+    print(f"Pre-calculando ferramenta de corte: {len(MODOS_CORTE)} modos x {N_CORTE} posicoes...")
     n_traces_total = 1 + len(ORDEM_TRACES_RESTO)
     frames = []
-    for eixo in ("x", "y"):
+    for eixo, invertido, modo in MODOS_CORTE:
         for p, j in enumerate(j_vals):
-            estado = montar(eixo, j)
+            estado = montar(eixo, j, invertido)
             dados_frame = [go.Surface(**estado["topografia"])] + [
                 trace_de_tipo(chave, estado[chave]) for chave in ORDEM_TRACES_RESTO
             ]
-            frames.append(go.Frame(data=dados_frame, name=f"{eixo}_{p}", traces=list(range(n_traces_total))))
+            frames.append(go.Frame(data=dados_frame, name=f"{modo}_{p}", traces=list(range(n_traces_total))))
     fig.frames = frames
 
     zmin, zmax = grid_z.min() - max(PROFUNDIDADE_CAMADAS), grid_z.max()
@@ -537,11 +560,18 @@ def main():
                 x=0.98, y=0.96, xanchor="right", yanchor="top",
                 bgcolor=MARCA_ROXO_ESCURO, bordercolor=MARCA_ROXO, borderwidth=1.5,
                 font=dict(color=MARCA_CINZA_CLARO, family=MARCA_FONTE),
-                buttons=[dict(label="Corte Leste-Oeste", method="skip"), dict(label="Corte Norte-Sul", method="skip")],
+                buttons=[dict(label="Leste-Oeste", method="skip"), dict(label="Oeste-Leste", method="skip")],
             ),
             dict(
                 type="buttons", direction="left", showactive=False,
                 x=0.98, y=0.86, xanchor="right", yanchor="top",
+                bgcolor=MARCA_ROXO_ESCURO, bordercolor=MARCA_ROXO, borderwidth=1.5,
+                font=dict(color=MARCA_CINZA_CLARO, family=MARCA_FONTE),
+                buttons=[dict(label="Norte-Sul", method="skip"), dict(label="Sul-Norte", method="skip")],
+            ),
+            dict(
+                type="buttons", direction="left", showactive=False,
+                x=0.98, y=0.76, xanchor="right", yanchor="top",
                 bgcolor=MARCA_ROXO_ESCURO, bordercolor=MARCA_ROXO, borderwidth=1.5,
                 font=dict(color=MARCA_CINZA_CLARO, family=MARCA_FONTE),
                 buttons=[
@@ -553,14 +583,14 @@ def main():
             ),
             dict(
                 type="buttons", direction="left", showactive=False,
-                x=0.98, y=0.76, xanchor="right", yanchor="top",
+                x=0.98, y=0.66, xanchor="right", yanchor="top",
                 bgcolor=MARCA_ROXO_ESCURO, bordercolor=MARCA_ROXO, borderwidth=1.5,
                 font=dict(color=MARCA_CINZA_CLARO, family=MARCA_FONTE),
                 buttons=[dict(label="Tema: Escuro", method="skip"), dict(label="Tema: Claro", method="skip")],
             ),
             dict(
                 type="buttons", direction="left", showactive=False,
-                x=0.98, y=0.66, xanchor="right", yanchor="top",
+                x=0.98, y=0.56, xanchor="right", yanchor="top",
                 bgcolor=MARCA_ROXO_ESCURO, bordercolor=MARCA_ROXO, borderwidth=1.5,
                 font=dict(color=MARCA_CINZA_CLARO, family=MARCA_FONTE),
                 buttons=[
@@ -615,10 +645,15 @@ def main():
 
     eixos_js = ",\n        ".join(
         "{nome:'%s', prefixo:'%s', valores:[%s]}" % (
-            eixo, "Corte (Leste-Oeste) em X: " if eixo == "x" else "Corte (Norte-Sul) em Y: ",
-            ",".join(f"{(xs if eixo == 'x' else ys)[j - 1]:.1f}" for j in j_vals),
+            modo, prefixo,
+            ",".join(f"{v:.1f}" for v in valores),
         )
-        for eixo in ("x", "y")
+        for modo, prefixo, valores in [
+            ("x", "Corte (Leste-Oeste) em X: ", [xs[j - 1] for j in j_vals]),
+            ("xinv", "Corte (Oeste-Leste) em X: ", [xs[-j] for j in j_vals]),
+            ("y", "Corte (Norte-Sul) em Y: ", [ys[j - 1] for j in j_vals]),
+            ("yinv", "Corte (Sul-Norte) em Y: ", [ys[-j] for j in j_vals]),
+        ]
     )
     indices_solido = [0] + list(range(1, 1 + 2 * N_CAMADAS))  # topografia + paredes/fundos das camadas
     logo_b64 = logo_base64()
@@ -719,7 +754,7 @@ def main():
                 patch['scene.' + eixo + '.zerolinecolor'] = t.grid;
                 patch['scene.' + eixo + '.color'] = t.texto;
             }});
-            for (var m = 0; m < 4; m++) {{
+            for (var m = 0; m < 6; m++) {{
                 patch['updatemenus[' + m + '].bgcolor'] = t.botaoBg;
                 patch['updatemenus[' + m + '].font.color'] = t.texto;
             }}
@@ -733,19 +768,20 @@ def main():
             document.body.style.background = t.paper;
         }}
 
-        // todos os botoes juntos num menu so agora -- roteia pelo indice
-        // (ev.active): 0,1=Topografia (restyle nativo, nada a fazer aqui),
-        // 2,3=Solido, 4,5=Corte, 6,7=Cor (restyle nativo).
-        // 4 menus separados agora (Solido / Corte / Cor / Tema), cada um so
-        // com o proprio par de botoes -- roteia pela posicao do menu (y), ja
-        // que ev.active sempre vem 0 ou 1 dentro de cada par.
+        // 6 menus separados agora (Solido / Corte-X / Corte-Y / Cor / Tema /
+        // Topografia), cada um so com o proprio par de botoes -- roteia pela
+        // posicao do menu (y), ja que ev.active sempre vem 0 ou 1 dentro de
+        // cada par. Cor (Hipsometria/Geologia) e Topografia (ON/OFF) usam
+        // method='restyle' nativo, nao precisam de rota aqui.
         gd.on('plotly_buttonclicked', function(ev) {{
             if (typeof ev.active !== 'number' || !ev.menu) return;
             if (Math.abs(ev.menu.y - 1.06) < 0.001) {{
                 irParaSolido(ev.active === 0);
             }} else if (Math.abs(ev.menu.y - 0.96) < 0.001) {{
-                irParaEixo(ev.active);
-            }} else if (Math.abs(ev.menu.y - 0.76) < 0.001) {{
+                irParaEixo(ev.active);  // 0=Leste-Oeste, 1=Oeste-Leste
+            }} else if (Math.abs(ev.menu.y - 0.86) < 0.001) {{
+                irParaEixo(2 + ev.active);  // 2=Norte-Sul, 3=Sul-Norte
+            }} else if (Math.abs(ev.menu.y - 0.66) < 0.001) {{
                 aplicarTema(ev.active === 0 ? 'escuro' : 'claro');
             }}
         }});
