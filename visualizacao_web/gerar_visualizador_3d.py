@@ -501,6 +501,36 @@ def main():
             lighting=dict(ambient=0.7, diffuse=0.6, specular=0.05),
         ))
 
+    # seta do norte -- trace 3D fixa (nao entra na lista de indices dos frames
+    # de corte, entao nao muda com a posicao/direcao do corte). Aponta +Y
+    # (norte real em UTM), gira junto com a camera ao orbitar a cena (ao
+    # contrario de um overlay 2D fixo na tela, que nao indicaria norte de
+    # verdade numa cena 3D que o usuario pode rotacionar livremente).
+    # Fica FORA da extensao real do modelo (a leste, xaxis range ganha uma
+    # margem extra so pra caber ela) -- dentro da extensao ela ficava "por
+    # cima" de lobos do sill/dique em varios angulos de camera (a elevacao
+    # em Z nao evita a ambiguidade visual da perspectiva).
+    comprimento_seta = (ymax - ymin) * 0.07
+    margem_seta_x = (xmax - xmin) * 0.05
+    seta_x = xmax + margem_seta_x * 0.5
+    seta_y0, seta_y1 = ymax - comprimento_seta, ymax
+    seta_z = (grid_z.max() + grid_z.min()) / 2
+    fig.add_trace(go.Scatter3d(
+        x=[seta_x, seta_x], y=[seta_y0, seta_y1], z=[seta_z, seta_z],
+        mode="lines", line=dict(color=MARCA_ROXO, width=7),
+        showlegend=False, hoverinfo="skip",
+    ))
+    fig.add_trace(go.Cone(
+        x=[seta_x], y=[seta_y1], z=[seta_z], u=[0], v=[comprimento_seta * 0.5], w=[0],
+        anchor="tip", sizemode="absolute", sizeref=comprimento_seta * 0.4,
+        colorscale=[[0, MARCA_ROXO], [1, MARCA_ROXO]], showscale=False, hoverinfo="skip",
+    ))
+    fig.add_trace(go.Scatter3d(
+        x=[seta_x], y=[seta_y1 + comprimento_seta * 0.2], z=[seta_z],
+        mode="text", text=["N"], textfont=dict(size=18, color=MARCA_ROXO, family=MARCA_FONTE),
+        showlegend=False, hoverinfo="skip",
+    ))
+
     idx_geo_inicio = 1 + len(ORDEM_TRACES_RESTO) - len(CHAVES_GEO)  # indice da 1a trace de decalque
 
     # 4 modos de corte: eixo x/y, cada um normal (mantem lado "menor") ou
@@ -533,7 +563,9 @@ def main():
         paper_bgcolor=MARCA_NAVY,
         font=dict(family=MARCA_FONTE, color=MARCA_CINZA_CLARO),
         scene=dict(
-            xaxis=dict(title="X (UTM)", range=[xmin, xmax], **eixo_3d),
+            # xaxis com folga extra a leste (margem_seta_x) so pra caber a seta do norte,
+            # que fica fora da extensao real do modelo de proposito (ver comentario acima).
+            xaxis=dict(title="X (UTM)", range=[xmin, xmax + margem_seta_x], **eixo_3d),
             yaxis=dict(title="Y (UTM)", range=[ymin, ymax], **eixo_3d),
             zaxis=dict(title="Z (m)", range=[zmin, zmax], **eixo_3d),
             aspectmode="manual",
