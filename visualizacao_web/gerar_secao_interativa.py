@@ -258,8 +258,12 @@ CORES_TRACES = {chave: CORES_CAMADAS[k] for k, chave in enumerate(_CHAVES_CAMADA
 CORES_TRACES.update({"quaternario": COR_QUATERNARIO, "sill": COR_SILL, "dique": COR_DIQUE})
 NOMES_TRACES = {chave: NOMES_CAMADAS[k] for k, chave in enumerate(_CHAVES_CAMADAS)}
 NOMES_TRACES.update({
-    "quaternario": "Depósito quaternário", "sill": "Sill de diabásio", "dique": "Dique de diabásio",
+    "quaternario": "Depósito quaternário", "sill": "Soleira", "dique": "Dique",
 })
+# ordem estratigrafica da legenda, igual ao 3D (gerar_visualizador_3d.py): deposito
+# quaternario, depois sill/dique, depois as 5 formacoes sedimentares reais.
+LEGENDRANK_TRACES = {"quaternario": 1, "sill": 2, "dique": 3}
+LEGENDRANK_TRACES.update({chave: 4 + k for k, chave in enumerate(_CHAVES_CAMADAS)})
 
 
 def main():
@@ -360,7 +364,7 @@ def main():
         else:
             fig.add_trace(go.Scatter(
                 x=x, y=y, mode="lines", line=dict(width=0), fill="toself",
-                fillcolor=CORES_TRACES[chave], name=NOMES_TRACES[chave],
+                fillcolor=CORES_TRACES[chave], name=NOMES_TRACES[chave], legendrank=LEGENDRANK_TRACES[chave],
             ), row=1, col=2)
 
     # escala grafica + seta norte no mapa em planta -- elementos cartograficos
@@ -459,7 +463,7 @@ def main():
 
     fig.update_layout(
         title=dict(
-            text="<b>Modelo 3D Taió Plumbing System</b> — Seção transversal interativa",
+            text="<b>Modelo 2D Taió Plumbing System</b> — Seção transversal interativa",
             font=dict(family=MARCA_FONTE, size=24, color=MARCA_CINZA_CLARO),
             x=0.03, xanchor="left",
         ),
