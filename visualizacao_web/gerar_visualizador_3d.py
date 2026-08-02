@@ -497,8 +497,8 @@ def main():
         fig.add_trace(go.Mesh3d(
             **estado_inicial[f"geo_{nome}"],
             color=CORES_FORMACOES_MAPA[nome], opacity=1.0, name=nome, showlegend=False,
-            visible=False, flatshading=True,
-            lighting=dict(ambient=0.7, diffuse=0.6, specular=0.05),
+            visible=False, flatshading=False,
+            lighting=dict(ambient=0.9, diffuse=0.3, specular=0.0),
         ))
 
     # seta do norte -- trace 3D fixa (nao entra na lista de indices dos frames
