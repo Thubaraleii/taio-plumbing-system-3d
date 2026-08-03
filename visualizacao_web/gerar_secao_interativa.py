@@ -450,7 +450,7 @@ def main():
         fig.add_trace(go.Scatter(
             x=rx, y=ry, mode="lines", line=dict(color="#2E6F95", width=1),
             name="Rios (OSM)", showlegend=True, visible=False, hoverinfo="none",
-            legendrank=LEGENDRANK_OSM["rios"],
+            legendrank=LEGENDRANK_OSM["rios"], legendgroup="rios",
         ), row=1, col=1)
     if OSM_ESTRADAS_GEOJSON.exists():
         gdf_estradas = gpd.read_file(OSM_ESTRADAS_GEOJSON)
@@ -458,7 +458,7 @@ def main():
         fig.add_trace(go.Scatter(
             x=rx, y=ry, mode="lines", line=dict(color="#4A4A4A", width=1),
             name="Estradas (OSM)", showlegend=True, visible=False, hoverinfo="none",
-            legendrank=LEGENDRANK_OSM["estradas"],
+            legendrank=LEGENDRANK_OSM["estradas"], legendgroup="estradas",
         ), row=1, col=1)
     # localidades/rios/estradas NAO viram rotulo no mapa (usuario pediu mapa
     # sem rotulo) -- em vez disso ficam disponiveis pro JS projetar como
@@ -486,16 +486,16 @@ def main():
         idx_pin_traces[f"{tipo}_linha"] = len(fig.data)
         fig.add_trace(go.Scatter(
             x=[], y=[], mode="lines", line=dict(color=estilo["cor"], width=1.5, dash="dot"),
-            showlegend=False, visible=False, hoverinfo="none",
+            showlegend=False, visible=False, hoverinfo="none", legendgroup=tipo,
         ), row=1, col=2)
         idx_pin_traces[f"{tipo}_marcador"] = len(fig.data)
         fig.add_trace(go.Scatter(
             x=[], y=[], mode="markers+text", textposition="top center",
             textfont=dict(size=9, color=MARCA_CINZA_CLARO, family=MARCA_FONTE),
-            marker=dict(size=8, color=estilo["cor"], symbol=estilo["simbolo"], line=dict(color=MARCA_CINZA_CLARO, width=1)),
+            marker=dict(color=estilo["cor"], symbol=estilo["simbolo"], line=dict(color=MARCA_CINZA_CLARO, width=1)),
             name={"lugares": "Localidades (OSM)", "rios": "Rios (OSM)", "estradas": "Estradas (OSM)"}[tipo],
             showlegend=(tipo == "lugares"), visible=False, hoverinfo="none",
-            legendrank=LEGENDRANK_OSM[tipo],
+            legendrank=LEGENDRANK_OSM[tipo], legendgroup=tipo,
         ), row=1, col=2)
     idx_osm_fim = len(fig.data) - 1
 
@@ -797,22 +797,48 @@ def main():
             return ty[n - 1];
         }}
 
-        // monta a linha condutora (base na topografia, ponta ALTURA_PIN_M acima)
-        // e o marcador/texto na ponta, pra um array de pontos {{xKm, zBase}} --
-        // estilo "pin" de mapa, cada trecho de linha separado por NaN.
-        function restylarPins(idxLinha, idxMarcador, pontos) {{
-            var lx = [], ly = [], mx = [], my = [], texts = [];
+        var LIMIAR_SOBREPOSICAO_KM = 0.5;  // pins mais pertos que isso escalonam de altura
+        var N_NIVEIS_ALTURA = 4;  // 1x,2x,3x,4x ALTURA_PIN_M, depois volta pro 1x
+
+        // escalona a altura (multiplo de ALTURA_PIN_M) de cada ponto -- pontos
+        // ja ordenados por x: sobe 1 nivel toda vez que o proximo esta perto
+        // do anterior (< LIMIAR_SOBREPOSICAO_KM), reseta quando abre espaco.
+        // Evita rotulo grudado em rotulo quando varios pins caem perto (ver
+        // screenshot que o usuario mandou -- "Estrada Estrada Sao..." ilegivel).
+        function atribuirAlturas(pontosOrdenados) {{
+            var nivel = 0;
+            pontosOrdenados.forEach(function(p, i) {{
+                if (i > 0 && (p.x - pontosOrdenados[i - 1].x) < LIMIAR_SOBREPOSICAO_KM) {{
+                    nivel = (nivel + 1) % N_NIVEIS_ALTURA;
+                }} else {{
+                    nivel = 0;
+                }}
+                p.altura = ALTURA_PIN_M * (nivel + 1);
+            }});
+        }}
+
+        // monta a linha condutora (base na topografia real, ponta na altura
+        // escalonada) + DOIS marcadores por pin: um pequeno exatamente na
+        // posicao/elevacao real do cruzamento (a "posicao" pedida, nao so o
+        // rotulo flutuando) e o marcador estilizado (com o nome) na ponta da
+        // linha condutora, estilo balao de mapa.
+        function restylarPins(idxLinha, idxMarcador, pontos, corTipo, simboloTipo) {{
+            var lx = [], ly = [], mx = [], my = [], texts = [], sizes = [], symbols = [], cores = [];
             pontos.forEach(function(p, i) {{
                 if (i > 0) {{ lx.push(NaN); ly.push(NaN); }}
-                var topo = p.z + ALTURA_PIN_M;
+                var topo = p.z + p.altura;
                 lx.push(p.x, p.x);
                 ly.push(p.z, topo);
-                mx.push(p.x);
-                my.push(topo);
-                texts.push(p.nome);
+                // ponto na posicao real (pequeno, sem rotulo)
+                mx.push(p.x); my.push(p.z); texts.push(''); sizes.push(5); symbols.push('circle'); cores.push(corTipo);
+                // ponto na ponta da linha condutora (estilizado, com o nome)
+                mx.push(p.x); my.push(topo); texts.push(p.nome); sizes.push(9); symbols.push(simboloTipo); cores.push(corTipo);
             }});
             Plotly.restyle(gd, {{x: [lx], y: [ly]}}, [idxLinha]);
-            Plotly.restyle(gd, {{x: [mx], y: [my], text: [texts]}}, [idxMarcador]);
+            Plotly.restyle(gd, {{
+                x: [mx], y: [my], text: [texts],
+                'marker.size': [sizes], 'marker.symbol': [symbols], 'marker.color': [cores],
+            }}, [idxMarcador]);
         }}
 
         // projeta cada localidade na linha de corte ATUAL (angulo a, deslocamento
@@ -824,7 +850,9 @@ def main():
         // offsetT da isso vira a distancia ate a linha JA deslocada. So vira
         // pin se essa distancia perpendicular for pequena (LIMIAR_PIN_M). Rios
         // e estradas usam cruzamento real pre-calculado (PINS_RIOS/PINS_ESTRADAS),
-        // ja tem a elevacao exata do ponto de cruzamento.
+        // ja tem a elevacao exata do ponto de cruzamento. As alturas sao
+        // escalonadas JUNTAS (localidade+rio+estrada perto uma da outra
+        // tambem colidem no grafico), depois cada tipo e restilizado separado.
         function atualizarPins(a, p) {{
             var info = ANGULOS[a];
             var offsetT = info.t[p];
@@ -836,16 +864,22 @@ def main():
                 var perp = tLoc - offsetT;
                 if (Math.abs(perp) <= LIMIAR_PIN_M) {{
                     var xKm = (s - info.s0) / 1000;
-                    lugares.push({{x: xKm, z: interpolarElevacao(xKm), nome: loc.nome}});
+                    lugares.push({{x: xKm, z: interpolarElevacao(xKm), nome: loc.nome, tipo: 'lugares'}});
                 }}
             }});
-            restylarPins(IDX_PIN_LUGARES_LINHA, IDX_PIN_LUGARES_MARCADOR, lugares);
+            var rios = (PINS_RIOS[a][p] || []).map(function(c) {{ return {{x: c.s, z: c.z, nome: c.nome, tipo: 'rios'}}; }});
+            var estradas = (PINS_ESTRADAS[a][p] || []).map(function(c) {{ return {{x: c.s, z: c.z, nome: c.nome, tipo: 'estradas'}}; }});
 
-            var rios = (PINS_RIOS[a][p] || []).map(function(c) {{ return {{x: c.s, z: c.z, nome: c.nome}}; }});
-            restylarPins(IDX_PIN_RIOS_LINHA, IDX_PIN_RIOS_MARCADOR, rios);
+            var todos = lugares.concat(rios, estradas);
+            todos.sort(function(a, b) {{ return a.x - b.x; }});
+            atribuirAlturas(todos);
 
-            var estradas = (PINS_ESTRADAS[a][p] || []).map(function(c) {{ return {{x: c.s, z: c.z, nome: c.nome}}; }});
-            restylarPins(IDX_PIN_ESTRADAS_LINHA, IDX_PIN_ESTRADAS_MARCADOR, estradas);
+            restylarPins(IDX_PIN_LUGARES_LINHA, IDX_PIN_LUGARES_MARCADOR,
+                todos.filter(function(pt) {{ return pt.tipo === 'lugares'; }}), '{MARCA_ROXO}', 'triangle-down');
+            restylarPins(IDX_PIN_RIOS_LINHA, IDX_PIN_RIOS_MARCADOR,
+                todos.filter(function(pt) {{ return pt.tipo === 'rios'; }}), '#2E6F95', 'circle');
+            restylarPins(IDX_PIN_ESTRADAS_LINHA, IDX_PIN_ESTRADAS_MARCADOR,
+                todos.filter(function(pt) {{ return pt.tipo === 'estradas'; }}), '#4A4A4A', 'square');
         }}
 
         function atualizarEspessuras(a, p) {{
