@@ -35,6 +35,9 @@ POLIGONOS_CPRM_GEOJSON = BASE.parent / "2_Banco_de_Dados" / "saida_processada" /
 OSM_RIOS_GEOJSON = BASE.parent / "2_Banco_de_Dados" / "saida_processada" / "osm_rios.geojson"
 OSM_ESTRADAS_GEOJSON = BASE.parent / "2_Banco_de_Dados" / "saida_processada" / "osm_estradas.geojson"
 OSM_LUGARES_GEOJSON = BASE.parent / "2_Banco_de_Dados" / "saida_processada" / "osm_lugares.geojson"
+PONTOS_CAMPO_GPKG = (
+    BASE.parent / "2_Banco_de_Dados" / "Unificação" / "GPKG_Novos" / "pontos_unificados_completo.gpkg"
+)
 LOGO_PATH = Path(__file__).parent / "assets" / "logo_gstech.jpg"
 OUT_HTML = Path(__file__).parent / "secao_interativa.html"
 
@@ -91,6 +94,16 @@ Z_REF_TILT = 1053.5  # ancora o plano em boundary(prof=350) = 703.5 (media real 
 COR_SILL = "#A63D2F"
 COR_DIQUE = "#1B4332"  # verde escuro
 COR_QUATERNARIO = "#D9CB82"
+# pontos de campo (catalogo unificado, ver PONTOS_CAMPO_GPKG) -- mesma paleta
+# das formacoes/sill/dique quando a litologia bate, cinza neutro pro resto.
+CORES_LITOLOGIA_CAMPO = {
+    "sill_diabasio": COR_SILL, "sill_diabasio_cprm": COR_SILL,
+    "dique": COR_DIQUE, "dique_cprm": COR_DIQUE,
+    "encaixante_teresina": CORES_CAMADAS[0], "encaixante_serra_alta": CORES_CAMADAS[1],
+    "encaixante_irati": CORES_CAMADAS[2], "encaixante_palermo": CORES_CAMADAS[3],
+    "encaixante_rio_bonito": CORES_CAMADAS[4],
+}
+COR_LITOLOGIA_PADRAO = "#999999"
 ESPESSURA_SILL = 400.0
 QUATERNARIO_LIMIAR = 450.0
 QUATERNARIO_ESPESSURA = 30.0
@@ -523,6 +536,30 @@ def main():
         ), row=1, col=2)
     idx_osm_fim = len(fig.data) - 1
 
+    # pontos de campo (catalogo unificado, 308 pontos reais medidos em campo)
+    # no mapa em planta -- coloridos por litologia_padronizada, popup no hover
+    # com dados da tabela de atributos. Toggle proprio, independente do OSM.
+    idx_pontos_campo = None
+    if PONTOS_CAMPO_GPKG.exists():
+        gdf_campo = gpd.read_file(PONTOS_CAMPO_GPKG)
+        cores_campo = [CORES_LITOLOGIA_CAMPO.get(lit, COR_LITOLOGIA_PADRAO) for lit in gdf_campo["litologia_padronizada"]]
+        hover_campo = [
+            f"<b>{row.ponto_id}</b> ({row.id_original})<br>"
+            f"Litologia: {row.litologia_padronizada}<br>"
+            f"Tipo: {row.tipo_ponto}<br>"
+            f"Qualidade: {row.qualidade_dado}<br>"
+            f"Z: {row.Z_m:.0f} m<br>"
+            f"{(row.descricao_campo or '')[:120]}"
+            for row in gdf_campo.itertuples()
+        ]
+        idx_pontos_campo = len(fig.data)
+        fig.add_trace(go.Scatter(
+            x=gdf_campo.geometry.x, y=gdf_campo.geometry.y, mode="markers",
+            marker=dict(size=6, color=cores_campo, line=dict(color=MARCA_CINZA_CLARO, width=0.5)),
+            text=hover_campo, hoverinfo="text",
+            name="Pontos de Campo", showlegend=False, visible=False,
+        ), row=1, col=1)
+
     idx_trace_terreno = None
     for chave in ORDEM_TRACES:
         x, y = inicial[chave]
@@ -596,7 +633,9 @@ def main():
         font=dict(size=13, color=MARCA_CINZA_CLARO), xanchor="right",
     )
 
-    n_traces_fixas = idx_osm_fim + 1  # heatmap + poligonos de geologia (+ quaternario) + camadas OSM -- nao mudam entre frames
+    # heatmap + poligonos de geologia (+ quaternario) + camadas OSM + pontos de campo (se existir) --
+    # nenhuma dessas traces muda entre frames, entao os frames de corte comecam logo depois delas.
+    n_traces_fixas = (idx_pontos_campo + 1) if idx_pontos_campo is not None else (idx_osm_fim + 1)
     frames = []
     for a, secoes_angulo in enumerate(todas_secoes):
         for p, secao in enumerate(secoes_angulo):
@@ -660,7 +699,10 @@ def main():
                          args=[{"visible": True}, list(range(idx_osm_inicio, idx_osm_fim + 1))]),
                     dict(label="OSM: OFF", method="restyle",
                          args=[{"visible": False}, list(range(idx_osm_inicio, idx_osm_fim + 1))]),
-                ],
+                ] + ([
+                    dict(label="Campo: ON", method="restyle", args=[{"visible": True}, [idx_pontos_campo]]),
+                    dict(label="Campo: OFF", method="restyle", args=[{"visible": False}, [idx_pontos_campo]]),
+                ] if idx_pontos_campo is not None else []),
             ),
         ],
         sliders=[dict(
