@@ -14,6 +14,7 @@ Blender.
 Uso:
     python scripts/04_exportar_topografia_para_blender.py
 """
+import sys
 from pathlib import Path
 
 import numpy as np
@@ -27,8 +28,16 @@ EXPORTS_DIR = BASE / "exports" / "meshes"
 
 # Resolucao da grade (pontos por eixo). So afeta o nivel de detalhe do
 # render no Blender -- nao tem relacao com a grade de calculo do GemPy
-# (RESOLUTION em 02_montar_modelo_gempy.py).
-RESOLUCAO = 300
+# (RESOLUTION em 02_montar_modelo_gempy.py). Bem mais fina que a grade do
+# visualizador web (63x63) -- aqui a textura e uma imagem de verdade (UV
+# mapping), sem o limite de 256 cores do Plotly/WebGL, entao vale a pena
+# manter alta pra aproveitar o detalhe da foto de satelite.
+RESOLUCAO = 500
+
+# fonte da textura: "satelite" (Esri World Imagery real, via contextily --
+# placeholder ate o ortomosaico proprio de drone existir) ou "hipsometria"
+# (cor por elevacao, versao antiga/alternativa).
+FONTE_TEXTURA = "satelite"
 
 # paleta hipsometrica customizada (baixo -> alto), mesma usada no
 # visualizador Plotly (blender/visualizacao_publico/scripts_bpy nao,
@@ -65,10 +74,17 @@ def main():
     n = RESOLUCAO
     EXPORTS_DIR.mkdir(parents=True, exist_ok=True)
 
-    # --- textura: tinta hipsometrica (cor por elevacao) ---
-    print("Gerando textura...")
-    norm = plt.Normalize(vmin=grid_z.min(), vmax=grid_z.max())
-    cores = COLORMAP(norm(grid_z))[:, :, :3]
+    # --- textura ---
+    print(f"Gerando textura ({FONTE_TEXTURA})...")
+    if FONTE_TEXTURA == "satelite":
+        sys.path.insert(0, str(BASE / "visualizacao_web"))
+        from gerar_visualizador_3d import obter_satelite_utm, amostrar_satelite_rgb
+        raster_satelite = obter_satelite_utm(xmin, ymin, xmax, ymax)
+        r, g, b = amostrar_satelite_rgb(raster_satelite, grid_x, grid_y, xmin, ymin, xmax, ymax)
+        cores = np.stack([r, g, b], axis=-1).astype(np.float64) / 255.0
+    else:
+        norm = plt.Normalize(vmin=grid_z.min(), vmax=grid_z.max())
+        cores = COLORMAP(norm(grid_z))[:, :, :3]
     # imagem com linha 0 = norte (Y maximo) no topo, como um mapa normal
     plt.imsave(TEXTURA_PATH, np.flipud(cores))
     print(f"  {TEXTURA_PATH}")
