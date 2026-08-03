@@ -40,6 +40,9 @@ POLIGONO_INTRUSIVA = BASE.parent / "2_Banco_de_Dados" / "dados_base" / "poligon_
 POLIGONOS_CPRM_GEOJSON = (
     BASE.parent / "2_Banco_de_Dados" / "saida_processada" / "formacoes_cprm_poligonos.geojson"
 )
+PONTOS_CAMPO_GPKG = (
+    BASE.parent / "2_Banco_de_Dados" / "Unificação" / "GPKG_Novos" / "pontos_unificados_completo.gpkg"
+)
 LOGO_PATH = Path(__file__).parent / "assets" / "logo_gstech.jpg"
 OUT_HTML = Path(__file__).parent / "viewer_3d_taio.html"
 
@@ -104,6 +107,18 @@ J_MIN_CORTE = 12  # minimo de colunas/linhas mantidas (evita um bloco degenerado
 NOMES_CAMADAS = ["Teresina", "Serra Alta", "Irati", "Palermo", "Rio Bonito"]
 CORES_CAMADAS = ["#D6C79A", "#8C8C86", "#3E362C", "#B5AE93", "#C9A66B"]
 PROFUNDIDADE_CAMADAS = [0.0, 350.0, 430.0, 485.0, 585.0, 854.0]
+
+# pontos de campo (catalogo unificado, ver PONTOS_CAMPO_GPKG) -- coloridos pela
+# mesma paleta das formacoes/sill/dique quando a litologia_padronizada bate com
+# uma delas; cinza neutro pro resto (encaixante generico/indefinido).
+CORES_LITOLOGIA_CAMPO = {
+    "sill_diabasio": COR_SILL, "sill_diabasio_cprm": COR_SILL,
+    "dique": COR_DIQUE, "dique_cprm": COR_DIQUE,
+    "encaixante_teresina": CORES_CAMADAS[0], "encaixante_serra_alta": CORES_CAMADAS[1],
+    "encaixante_irati": CORES_CAMADAS[2], "encaixante_palermo": CORES_CAMADAS[3],
+    "encaixante_rio_bonito": CORES_CAMADAS[4],
+}
+COR_LITOLOGIA_PADRAO = "#999999"  # encaixante_sedimentar generico / indefinido / outros
 
 # trend regional: plano BRUTO ajustado direto aos pontos reais de contato
 # Teresina/Serra Alta (CPRM, n=627 -- o contato mais denso em dado, ver
@@ -629,6 +644,30 @@ def main():
         showlegend=False, hoverinfo="skip",
     ))
 
+    # pontos de campo (catalogo unificado, 308 pontos reais medidos em campo) --
+    # trace 3D fixa (nao clipada pela ferramenta de corte, igual seta/satelite),
+    # colorida por litologia_padronizada, popup no hover com dados da tabela de
+    # atributos. Comeca invisivel, toggle proprio.
+    idx_pontos_campo = len(fig.data)
+    if PONTOS_CAMPO_GPKG.exists():
+        gdf_campo = gpd.read_file(PONTOS_CAMPO_GPKG)
+        cores_campo = [CORES_LITOLOGIA_CAMPO.get(lit, COR_LITOLOGIA_PADRAO) for lit in gdf_campo["litologia_padronizada"]]
+        hover_campo = [
+            f"<b>{row.ponto_id}</b> ({row.id_original})<br>"
+            f"Litologia: {row.litologia_padronizada}<br>"
+            f"Tipo: {row.tipo_ponto}<br>"
+            f"Qualidade: {row.qualidade_dado}<br>"
+            f"Z: {row.Z_m:.0f} m<br>"
+            f"{(row.descricao_campo or '')[:120]}"
+            for row in gdf_campo.itertuples()
+        ]
+        fig.add_trace(go.Scatter3d(
+            x=gdf_campo.geometry.x, y=gdf_campo.geometry.y, z=gdf_campo["Z_m"],
+            mode="markers", marker=dict(size=4, color=cores_campo, line=dict(color=MARCA_CINZA_CLARO, width=0.5)),
+            text=hover_campo, hoverinfo="text",
+            name="Pontos de Campo", showlegend=False, visible=False,
+        ))
+
     idx_geo_inicio = 1 + len(ORDEM_TRACES_RESTO) - len(CHAVES_GEO) - 1  # indice da 1a trace de decalque
     idx_satelite_trace = 1 + len(ORDEM_TRACES_RESTO) - 1  # ultimo item de ORDEM_TRACES_RESTO
 
@@ -734,6 +773,18 @@ def main():
                 buttons=[
                     dict(label="Topografia: ON", method="restyle", args=[{"visible": True}, [0]]),
                     dict(label="Topografia: OFF", method="restyle", args=[{"visible": False}, [0]]),
+                ],
+            ),
+            dict(
+                type="buttons", direction="left", showactive=False,
+                x=0.98, y=0.38, xanchor="right", yanchor="top",
+                bgcolor=MARCA_ROXO_ESCURO, bordercolor=MARCA_ROXO, borderwidth=1.5,
+                font=dict(color=MARCA_CINZA_CLARO, family=MARCA_FONTE),
+                buttons=[
+                    dict(label="Pontos de Campo: ON", method="restyle",
+                         args=[{"visible": True}, [idx_pontos_campo]]),
+                    dict(label="Pontos de Campo: OFF", method="restyle",
+                         args=[{"visible": False}, [idx_pontos_campo]]),
                 ],
             ),
         ],
@@ -893,7 +944,7 @@ def main():
                 patch['scene.' + eixo + '.zerolinecolor'] = t.grid;
                 patch['scene.' + eixo + '.color'] = t.texto;
             }});
-            for (var m = 0; m < 6; m++) {{
+            for (var m = 0; m < 7; m++) {{
                 patch['updatemenus[' + m + '].bgcolor'] = t.botaoBg;
                 patch['updatemenus[' + m + '].font.color'] = t.texto;
             }}
