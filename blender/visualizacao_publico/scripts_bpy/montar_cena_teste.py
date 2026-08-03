@@ -29,7 +29,7 @@ OUT_DIR = BASE / "blender" / "visualizacao_publico"
 # aproximada do terreno, pra exagero vertical partir do "chao".
 CENTRO_X, CENTRO_Y, Z_REF = 593463.0, 7012062.0, 165.0
 EXAGERO_Z = 4.0
-RESOLUCAO_GRADE_TOPO = 300  # tem que bater com RESOLUCAO em 04_exportar_topografia_para_blender.py
+RESOLUCAO_GRADE_TOPO = 500  # tem que bater com RESOLUCAO em 04_exportar_topografia_para_blender.py
 
 ALPHA_TOPO_TERRENO = 0.55
 

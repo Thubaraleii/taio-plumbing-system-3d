@@ -30,9 +30,12 @@ BASE = Path(r"C:\Users\thuba\Desktop\Mestrado\1_Modelo_3D_Taio")
 TOPO_NPY = BASE / "dados_entrada" / "topografia_drone" / "topografia_xyz.npy"
 SATELITE_CACHE_DIR = BASE / "dados_entrada" / "satelite_esri"
 SATELITE_CACHE_NPY = SATELITE_CACHE_DIR / "satelite_utm.npy"
-SATELITE_RESOLUCAO = 1000  # resolucao (pixels/eixo) do raster UTM cacheado -- so precisa cobrir
-# bem a grade de render (RESOLUCAO_GRID_TOPO), nao a resolucao real da imagem de satelite
-SATELITE_ZOOM = 15  # nivel de zoom das tiles Esri World Imagery
+SATELITE_RESOLUCAO = 2000  # resolucao (pixels/eixo) do raster UTM cacheado -- so precisa cobrir
+# bem a grade de render (RESOLUCAO_GRID_TOPO no web, RESOLUCAO no Blender), nao precisa exceder
+# muito a resolucao real da imagem de satelite (o cache e compartilhado pelos dois pipelines).
+SATELITE_ZOOM = 17  # nivel de zoom das tiles Esri World Imagery -- 17 = boa nitidez pro Blender
+# (mesh mais fina, RESOLUCAO=500 em 04_exportar_topografia_para_blender.py); pro visualizador web
+# (grade de corte bem mais grossa, 63x63) o zoom real quase nao importa, a grade que limita.
 POLIGONO_INTRUSIVA = BASE.parent / "2_Banco_de_Dados" / "dados_base" / "poligon_intrusiva.shp"
 POLIGONOS_CPRM_GEOJSON = (
     BASE.parent / "2_Banco_de_Dados" / "saida_processada" / "formacoes_cprm_poligonos.geojson"
