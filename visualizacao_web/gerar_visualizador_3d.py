@@ -683,28 +683,28 @@ def main():
         updatemenus=[
             dict(
                 type="buttons", direction="left", showactive=False,
-                x=0.98, y=1.06, xanchor="right", yanchor="top",
+                x=0.98, y=0.98, xanchor="right", yanchor="top",
                 bgcolor=MARCA_ROXO_ESCURO, bordercolor=MARCA_ROXO, borderwidth=1.5,
                 font=dict(color=MARCA_CINZA_CLARO, family=MARCA_FONTE),
                 buttons=[dict(label="Sólido: ON", method="skip"), dict(label="Sólido: OFF", method="skip")],
             ),
             dict(
                 type="buttons", direction="left", showactive=False,
-                x=0.98, y=0.96, xanchor="right", yanchor="top",
+                x=0.98, y=0.88, xanchor="right", yanchor="top",
                 bgcolor=MARCA_ROXO_ESCURO, bordercolor=MARCA_ROXO, borderwidth=1.5,
                 font=dict(color=MARCA_CINZA_CLARO, family=MARCA_FONTE),
                 buttons=[dict(label="Leste-Oeste", method="skip"), dict(label="Oeste-Leste", method="skip")],
             ),
             dict(
                 type="buttons", direction="left", showactive=False,
-                x=0.98, y=0.86, xanchor="right", yanchor="top",
+                x=0.98, y=0.78, xanchor="right", yanchor="top",
                 bgcolor=MARCA_ROXO_ESCURO, bordercolor=MARCA_ROXO, borderwidth=1.5,
                 font=dict(color=MARCA_CINZA_CLARO, family=MARCA_FONTE),
                 buttons=[dict(label="Norte-Sul", method="skip"), dict(label="Sul-Norte", method="skip")],
             ),
             dict(
                 type="buttons", direction="left", showactive=False,
-                x=0.98, y=0.76, xanchor="right", yanchor="top",
+                x=0.98, y=0.68, xanchor="right", yanchor="top",
                 bgcolor=MARCA_ROXO_ESCURO, bordercolor=MARCA_ROXO, borderwidth=1.5,
                 font=dict(color=MARCA_CINZA_CLARO, family=MARCA_FONTE),
                 buttons=[
@@ -721,14 +721,14 @@ def main():
             ),
             dict(
                 type="buttons", direction="left", showactive=False,
-                x=0.98, y=0.66, xanchor="right", yanchor="top",
+                x=0.98, y=0.58, xanchor="right", yanchor="top",
                 bgcolor=MARCA_ROXO_ESCURO, bordercolor=MARCA_ROXO, borderwidth=1.5,
                 font=dict(color=MARCA_CINZA_CLARO, family=MARCA_FONTE),
                 buttons=[dict(label="Tema: Escuro", method="skip"), dict(label="Tema: Claro", method="skip")],
             ),
             dict(
                 type="buttons", direction="left", showactive=False,
-                x=0.98, y=0.56, xanchor="right", yanchor="top",
+                x=0.98, y=0.48, xanchor="right", yanchor="top",
                 bgcolor=MARCA_ROXO_ESCURO, bordercolor=MARCA_ROXO, borderwidth=1.5,
                 font=dict(color=MARCA_CINZA_CLARO, family=MARCA_FONTE),
                 buttons=[
@@ -914,13 +914,13 @@ def main():
         // method='restyle' nativo, nao precisam de rota aqui.
         gd.on('plotly_buttonclicked', function(ev) {{
             if (typeof ev.active !== 'number' || !ev.menu) return;
-            if (Math.abs(ev.menu.y - 1.06) < 0.001) {{
+            if (Math.abs(ev.menu.y - 0.98) < 0.001) {{
                 irParaSolido(ev.active === 0);
-            }} else if (Math.abs(ev.menu.y - 0.96) < 0.001) {{
+            }} else if (Math.abs(ev.menu.y - 0.88) < 0.001) {{
                 irParaEixo(ev.active);  // 0=Leste-Oeste, 1=Oeste-Leste
-            }} else if (Math.abs(ev.menu.y - 0.86) < 0.001) {{
+            }} else if (Math.abs(ev.menu.y - 0.78) < 0.001) {{
                 irParaEixo(2 + ev.active);  // 2=Norte-Sul, 3=Sul-Norte
-            }} else if (Math.abs(ev.menu.y - 0.66) < 0.001) {{
+            }} else if (Math.abs(ev.menu.y - 0.58) < 0.001) {{
                 aplicarTema(ev.active === 0 ? 'escuro' : 'claro');
             }}
         }});
