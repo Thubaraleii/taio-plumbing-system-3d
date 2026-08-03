@@ -19,6 +19,8 @@ from pathlib import Path
 import geopandas as gpd
 import numpy as np
 import plotly.graph_objects as go
+from rasterio.transform import from_bounds
+from rasterio.warp import reproject, Resampling
 from scipy.interpolate import griddata, LinearNDInterpolator, NearestNDInterpolator
 from scipy.spatial import Delaunay
 from shapely.geometry import Point, box
@@ -26,6 +28,11 @@ from shapely.prepared import prep
 
 BASE = Path(r"C:\Users\thuba\Desktop\Mestrado\1_Modelo_3D_Taio")
 TOPO_NPY = BASE / "dados_entrada" / "topografia_drone" / "topografia_xyz.npy"
+SATELITE_CACHE_DIR = BASE / "dados_entrada" / "satelite_esri"
+SATELITE_CACHE_NPY = SATELITE_CACHE_DIR / "satelite_utm.npy"
+SATELITE_RESOLUCAO = 1000  # resolucao (pixels/eixo) do raster UTM cacheado -- so precisa cobrir
+# bem a grade de render (RESOLUCAO_GRID_TOPO), nao a resolucao real da imagem de satelite
+SATELITE_ZOOM = 15  # nivel de zoom das tiles Esri World Imagery
 POLIGONO_INTRUSIVA = BASE.parent / "2_Banco_de_Dados" / "dados_base" / "poligon_intrusiva.shp"
 POLIGONOS_CPRM_GEOJSON = (
     BASE.parent / "2_Banco_de_Dados" / "saida_processada" / "formacoes_cprm_poligonos.geojson"
@@ -49,7 +56,9 @@ def logo_base64():
         return None
     return base64.b64encode(LOGO_PATH.read_bytes()).decode("ascii")
 
-RESOLUCAO_GRID_TOPO = 70  # pontos por eixo, so para o render (nao afeta o GemPy) -- baixado de 250, depois 110/95/80/75.
+RESOLUCAO_GRID_TOPO = 63  # pontos por eixo, so para o render (nao afeta o GemPy) -- baixado de 250, depois 110/95/80/75/70.
+# Caiu mais quando a trace de satelite (Esri) foi adicionada -- ela duplica x/y/z/surfacecolor da
+# grade (mais uma "topografia" inteira, por frame de corte), estourando o limite de 100MB de novo.
 # Precisou cair mais quando a ferramenta de corte ganhou 4 modos (2 eixos x 2 direcoes, ver
 # MODOS_CORTE) -- cada frame de corte carrega o estado inteiro (topografia+camadas+corpos+
 # decalques), entao 4 modos x N_CORTE posicoes multiplica o arquivo rapido; sem baixar a
@@ -142,7 +151,7 @@ CHAVES_GEO = [f"geo_{nome}" for nome in ORDEM_FORMACOES]
 # geologicos -- todos regenerados por estado de corte.
 ORDEM_TRACES_RESTO = (
     [chave for k in range(N_CAMADAS) for chave in (f"camada_{k}_parede", f"camada_{k}_fundo")]
-    + ["quaternario_topo", "quaternario_fundo", "sill", "dique"] + CHAVES_GEO
+    + ["quaternario_topo", "quaternario_fundo", "sill", "dique"] + CHAVES_GEO + ["topografia_satelite"]
 )
 
 
@@ -189,6 +198,47 @@ def montar_elevador(xyz):
         return float(z)
 
     return elevacao
+
+
+def obter_satelite_utm(xmin, ymin, xmax, ymax):
+    """Busca (ou le do cache local) uma imagem de satelite Esri World Imagery
+    cobrindo a extensao do modelo, ja reprojetada pra UTM (EPSG:31982) --
+    PLACEHOLDER ate o usuario ter um ortomosaico proprio de drone (precisao
+    ~1m). A busca+reprojecao demora cerca de 1 min (rede) -- cacheada em
+    SATELITE_CACHE_NPY; apagar esse arquivo forca buscar de novo (ex.: se
+    trocar de zoom ou quiser atualizar a imagem)."""
+    if SATELITE_CACHE_NPY.exists():
+        return np.load(SATELITE_CACHE_NPY)
+
+    import contextily as ctx
+
+    print("Baixando imagem de satelite Esri World Imagery (~1 min, sera cacheada)...")
+    gdf = gpd.GeoDataFrame(geometry=[box(xmin, ymin, xmax, ymax)], crs="EPSG:31982")
+    w, s, e, n = gdf.to_crs("EPSG:4326").total_bounds
+    img, ext = ctx.bounds2img(
+        w, s, e, n, ll=True, zoom=SATELITE_ZOOM, source=ctx.providers.Esri.WorldImagery, n_connections=8,
+    )
+    src_transform = from_bounds(ext[0], ext[2], ext[1], ext[3], img.shape[1], img.shape[0])
+    dst_transform = from_bounds(xmin, ymin, xmax, ymax, SATELITE_RESOLUCAO, SATELITE_RESOLUCAO)
+    dst = np.zeros((3, SATELITE_RESOLUCAO, SATELITE_RESOLUCAO), dtype=np.uint8)
+    reproject(
+        source=np.moveaxis(img[:, :, :3], -1, 0), destination=dst,
+        src_transform=src_transform, src_crs="EPSG:3857",
+        dst_transform=dst_transform, dst_crs="EPSG:31982",
+        resampling=Resampling.bilinear,
+    )
+    SATELITE_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    np.save(SATELITE_CACHE_NPY, dst)
+    return dst
+
+
+def amostrar_satelite_rgb(raster_rgb, grid_x, grid_y, xmin, ymin, xmax, ymax):
+    """Amostra (nearest, o raster ja foi reamostrado bilinear na reprojecao)
+    a cor RGB do raster de satelite em cada ponto (x,y) da grade de render."""
+    _, h, w = raster_rgb.shape
+    col = np.clip(((grid_x - xmin) / (xmax - xmin) * (w - 1)).astype(int), 0, w - 1)
+    row = np.clip(((ymax - grid_y) / (ymax - ymin) * (h - 1)).astype(int), 0, h - 1)
+    return raster_rgb[0, row, col], raster_rgb[1, row, col], raster_rgb[2, row, col]
 
 
 def densificar_contorno(poligono, passo: float):
@@ -332,7 +382,7 @@ def construir_decal_cortado(geoms, elevacao_fn, eixo, valor_corte, bbox_amplo, i
 
 def montar_estado(eixo, j, invertido, grid_x, grid_y, grid_z, grid_contatos, topo_quat, fundo_quat,
                    xs, ys, gdf_sill, gdf_dique, elevacao_fn, bbox_amplo,
-                   formacoes_geoms, zmin_hipso, zmax_hipso):
+                   formacoes_geoms, zmin_hipso, zmax_hipso, idx_satelite):
     """Monta os dados (x,y,z / i,j,k) de todas as traces pra um estado de
     corte -- eixo='x' corta em X, eixo='y' corta em Y; invertido troca qual
     lado fica visivel (mantem X<=valor normal / X>=valor invertido, e o
@@ -377,6 +427,11 @@ def montar_estado(eixo, j, invertido, grid_x, grid_y, grid_z, grid_contatos, top
     for nome in ORDEM_FORMACOES:
         dados[f"geo_{nome}"] = construir_decal_cortado(
             formacoes_geoms.get(nome, []), elevacao_fn, eixo, valor_corte, bbox_amplo, invertido=invertido)
+
+    # sem colorscale/cmin/cmax aqui de proposito -- isso e fixo (definido uma unica vez no
+    # fig.add_trace() inicial) e MUITO grande (um stop por vertice da grade, ver main()); repetir
+    # em cada frame inflaria o HTML absurdamente pra nada, ja que essas props nao mudam com o corte.
+    dados["topografia_satelite"] = dict(x=gx, y=gy, z=gz, surfacecolor=cortar(idx_satelite))
     return dados
 
 
@@ -434,10 +489,24 @@ def main():
     print(f"Mapa geologico real: {len(gdf_formacoes)} formacoes ({', '.join(formacoes_geoms)})")
     zmin_hipso, zmax_hipso = float(grid_z.min()), float(grid_z.max())
 
+    # satelite Esri (placeholder ate ter ortomosaico proprio, ver obter_satelite_utm) -- amostrado
+    # na mesma grade da topografia, cada vertice vira um indice unico numa colorscale gigante
+    # (um "stop" exato por vertice, ver fig.add_trace mais abaixo) pra simular textura fotografica
+    # numa Surface do Plotly (que so aceita surfacecolor mapeada por colorscale, nao textura de
+    # imagem de verdade).
+    raster_satelite = obter_satelite_utm(xmin, ymin, xmax, ymax)
+    r_sat, g_sat, b_sat = amostrar_satelite_rgb(raster_satelite, grid_x, grid_y, xmin, ymin, xmax, ymax)
+    n_sat = grid_x.size
+    idx_satelite = np.arange(n_sat).reshape(grid_x.shape) / (n_sat - 1)
+    colorscale_satelite = [
+        [k / (n_sat - 1), f"rgb({r},{g},{b})"]
+        for k, (r, g, b) in enumerate(zip(r_sat.flat, g_sat.flat, b_sat.flat))
+    ]
+
     def montar(eixo, j, invertido=False):
         return montar_estado(eixo, j, invertido, grid_x, grid_y, grid_z, grid_contatos, topo_quat, fundo_quat,
                               xs, ys, gdf_sill, gdf_dique, elevacao_fn, bbox_amplo,
-                              formacoes_geoms, zmin_hipso, zmax_hipso)
+                              formacoes_geoms, zmin_hipso, zmax_hipso, idx_satelite)
 
     j_vals = np.linspace(J_MIN_CORTE, RESOLUCAO_GRID_TOPO, N_CORTE).astype(int)
     estado_inicial = montar("x", j_vals[-1])  # sem corte (igual a versao original)
@@ -506,6 +575,14 @@ def main():
             lighting=dict(ambient=0.9, diffuse=0.3, specular=0.0),
         ))
 
+    # satelite Esri -- colorscale/cmin/cmax fixos aqui (unica vez, NAO repetidos por frame, ver
+    # nota em montar_estado). Comeca invisivel, terceiro modo do botao Hipsometria/Geologia/Satelite.
+    fig.add_trace(go.Surface(
+        **estado_inicial["topografia_satelite"],
+        colorscale=colorscale_satelite, cmin=0, cmax=1, showscale=False,
+        opacity=1.0, name="Satélite (Esri, provisório)", showlegend=False, visible=False,
+    ))
+
     # seta do norte -- trace 3D fixa (nao entra na lista de indices dos frames
     # de corte, entao nao muda com a posicao/direcao do corte). Aponta +Y
     # (norte real em UTM), gira junto com a camera ao orbitar a cena (ao
@@ -541,7 +618,8 @@ def main():
         showlegend=False, hoverinfo="skip",
     ))
 
-    idx_geo_inicio = 1 + len(ORDEM_TRACES_RESTO) - len(CHAVES_GEO)  # indice da 1a trace de decalque
+    idx_geo_inicio = 1 + len(ORDEM_TRACES_RESTO) - len(CHAVES_GEO) - 1  # indice da 1a trace de decalque
+    idx_satelite_trace = 1 + len(ORDEM_TRACES_RESTO) - 1  # ultimo item de ORDEM_TRACES_RESTO
 
     # 4 modos de corte: eixo x/y, cada um normal (mantem lado "menor") ou
     # invertido (mantem lado "maior") -- deixa escolher de qual lado o corte
@@ -620,9 +698,14 @@ def main():
                 font=dict(color=MARCA_CINZA_CLARO, family=MARCA_FONTE),
                 buttons=[
                     dict(label="Hipsometria", method="restyle",
-                         args=[{"visible": False}, list(range(idx_geo_inicio, idx_geo_inicio + len(CHAVES_GEO)))]),
+                         args=[{"visible": [True] + [False] * len(CHAVES_GEO) + [False]},
+                               [0] + list(range(idx_geo_inicio, idx_geo_inicio + len(CHAVES_GEO))) + [idx_satelite_trace]]),
                     dict(label="Geologia", method="restyle",
-                         args=[{"visible": True}, list(range(idx_geo_inicio, idx_geo_inicio + len(CHAVES_GEO)))]),
+                         args=[{"visible": [False] + [True] * len(CHAVES_GEO) + [False]},
+                               [0] + list(range(idx_geo_inicio, idx_geo_inicio + len(CHAVES_GEO))) + [idx_satelite_trace]]),
+                    dict(label="Satélite", method="restyle",
+                         args=[{"visible": [False] + [False] * len(CHAVES_GEO) + [True]},
+                               [0] + list(range(idx_geo_inicio, idx_geo_inicio + len(CHAVES_GEO))) + [idx_satelite_trace]]),
                 ],
             ),
             dict(
@@ -662,7 +745,8 @@ def main():
                     # disso.
                     dict(
                         method="restyle",
-                        args=[{"opacity": op / 10}, [0] + list(range(idx_geo_inicio, idx_geo_inicio + len(CHAVES_GEO)))],
+                        args=[{"opacity": op / 10},
+                              [0] + list(range(idx_geo_inicio, idx_geo_inicio + len(CHAVES_GEO))) + [idx_satelite_trace]],
                         label=f"{op / 10:.1f}",
                     )
                     for op in range(OPACIDADE_MIN_OP, 11)

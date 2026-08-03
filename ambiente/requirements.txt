@@ -7,3 +7,8 @@ pyvista
 pandas
 numpy
 matplotlib
+geopandas
+plotly
+shapely
+scipy
+contextily  # busca de basemap de satelite (Esri World Imagery) pro visualizador 3D web
