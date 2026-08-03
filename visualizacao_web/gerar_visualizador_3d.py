@@ -490,17 +490,25 @@ def main():
     zmin_hipso, zmax_hipso = float(grid_z.min()), float(grid_z.max())
 
     # satelite Esri (placeholder ate ter ortomosaico proprio, ver obter_satelite_utm) -- amostrado
-    # na mesma grade da topografia, cada vertice vira um indice unico numa colorscale gigante
-    # (um "stop" exato por vertice, ver fig.add_trace mais abaixo) pra simular textura fotografica
-    # numa Surface do Plotly (que so aceita surfacecolor mapeada por colorscale, nao textura de
-    # imagem de verdade).
+    # na mesma grade da topografia. Pra simular textura fotografica numa Surface do Plotly (que so
+    # aceita surfacecolor mapeada por colorscale, nao textura de imagem de verdade), cada vertice
+    # vira um indice numa colorscale com um "stop" por cor -- MAS o renderizador WebGL (gl-surface3d)
+    # tem um limite duro de 256 "shades" na colorscale (testado: uma cor por vertice, 3969 cores
+    # numa grade 63x63, deu erro "map requires nshades to be at least size 3969" e a trace nao
+    # renderizava nada). Solucao: reduzir a PALETA de cores pra no maximo 256 (quantizacao, estilo
+    # GIF/paleta indexada) via Pillow, mantendo a resolucao espacial da grade cheia -- varios
+    # vertices proximos passam a compartilhar a cor mais parecida da paleta, mas a malha continua
+    # inteira (nao afeta a nitidez espacial, so a variedade de cores).
+    from PIL import Image
     raster_satelite = obter_satelite_utm(xmin, ymin, xmax, ymax)
     r_sat, g_sat, b_sat = amostrar_satelite_rgb(raster_satelite, grid_x, grid_y, xmin, ymin, xmax, ymax)
-    n_sat = grid_x.size
-    idx_satelite = np.arange(n_sat).reshape(grid_x.shape) / (n_sat - 1)
+    img_rgb = np.stack([r_sat, g_sat, b_sat], axis=-1).astype(np.uint8)
+    img_quant = Image.fromarray(img_rgb, mode="RGB").quantize(colors=256, method=Image.MEDIANCUT)
+    paleta = np.array(img_quant.getpalette()[:256 * 3]).reshape(-1, 3)
+    n_cores_paleta = len(paleta)
+    idx_satelite = np.array(img_quant, dtype=np.float64) / (n_cores_paleta - 1)
     colorscale_satelite = [
-        [k / (n_sat - 1), f"rgb({r},{g},{b})"]
-        for k, (r, g, b) in enumerate(zip(r_sat.flat, g_sat.flat, b_sat.flat))
+        [k / (n_cores_paleta - 1), f"rgb({r},{g},{b})"] for k, (r, g, b) in enumerate(paleta)
     ]
 
     def montar(eixo, j, invertido=False):
