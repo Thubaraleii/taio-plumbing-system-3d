@@ -311,7 +311,19 @@ def calcular_cruzamentos(xs, ys, gdf, sindex, elevacao):
             vistos.add(chave)
             cruzamentos.append((s_km, float(elevacao(pt.x, pt.y)), nome))
     cruzamentos.sort(key=lambda c: c[0])
-    return cruzamentos
+
+    # funde cruzamentos consecutivos do MESMO rio/estrada que caem muito perto
+    # um do outro -- um curso d'agua sinuoso pode cruzar a linha reta varias
+    # vezes numa curva fechada (poucas centenas de metros), o que duplicava o
+    # mesmo nome empilhado/ilegivel no grafico (bug reportado pelo usuario).
+    # So a distancia importa aqui, nao a elevacao (fica igual/parecida mesmo).
+    LIMIAR_FUSAO_KM = 0.5
+    fundidos = []
+    for c in cruzamentos:
+        if fundidos and fundidos[-1][2] == c[2] and (c[0] - fundidos[-1][0]) < LIMIAR_FUSAO_KM:
+            continue  # mesmo nome, perto do anterior -- mantem so a primeira ocorrencia
+        fundidos.append(c)
+    return fundidos
 
 
 _CHAVES_CAMADAS = [f"camada{k}" for k in range(len(PROFUNDIDADE_CAMADAS) - 1)]
@@ -460,21 +472,33 @@ def main():
             name="Estradas (OSM)", showlegend=True, visible=False, hoverinfo="none",
             legendrank=LEGENDRANK_OSM["estradas"], legendgroup="estradas",
         ), row=1, col=1)
-    # localidades/rios/estradas NAO viram rotulo no mapa (usuario pediu mapa
-    # sem rotulo) -- em vez disso ficam disponiveis pro JS projetar como
-    # "pin" na SECAO (row=1,col=2): uma linha condutora fina subindo da
-    # topografia real ate um pouco acima dela, com o marcador+nome na ponta
-    # (estilo pin de mapa). Localidades sao projetadas continuamente (jeito
-    # qualquer deslocamento/angulo, ver atualizarPins); rios/estradas usam
-    # cruzamento real da linha de corte (precomputado por posicao em
-    # calcular_cruzamentos, so existe nos PASSO_POSICAO discretos).
-    # 2 traces por tipo (linha condutora + marcador/texto), todas comecam
-    # vazias, JS preenche no load e a cada mudanca de angulo/posicao.
+    # localidades: sem rotulo permanente no mapa (usuario pediu mapa sem
+    # rotulo), mas ganham um marcador GRANDE/em destaque (estrela dourada) --
+    # o nome do municipio so no hover, pra nao poluir mas ainda ficar visivel
+    # e reconhecivel de cara. Mesmo legendgroup da versao "pin" da secao (nao
+    # duplica entrada na legenda, so essa e a da secao ligam/desligam juntas).
     localidades_dados = []
     if OSM_LUGARES_GEOJSON.exists():
         gdf_lugares = gpd.read_file(OSM_LUGARES_GEOJSON)
         localidades_dados = list(zip(gdf_lugares["name"], gdf_lugares.geometry.x, gdf_lugares.geometry.y))
+        fig.add_trace(go.Scatter(
+            x=[x for _, x, _ in localidades_dados], y=[y for _, _, y in localidades_dados],
+            mode="markers", marker=dict(size=14, color=MARCA_ROXO, symbol="triangle-down",
+                                          line=dict(color=MARCA_CINZA_CLARO, width=1.5)),
+            text=[nome for nome, _, _ in localidades_dados], hoverinfo="text",
+            showlegend=False, visible=False, legendgroup="lugares",
+        ), row=1, col=1)
 
+    # rios/estradas NAO viram rotulo no mapa (usuario pediu mapa sem rotulo)
+    # -- em vez disso ficam disponiveis pro JS projetar como "pin" na SECAO
+    # (row=1,col=2): uma linha condutora fina subindo da topografia real ate
+    # um pouco acima dela, com o marcador+nome na ponta (estilo pin de
+    # mapa). Localidades sao projetadas continuamente (qualquer deslocamento/
+    # angulo, ver atualizarPins); rios/estradas usam cruzamento real da linha
+    # de corte (precomputado por posicao em calcular_cruzamentos, so existe
+    # nos PASSO_POSICAO discretos). 2 traces por tipo (linha condutora +
+    # marcador/texto), todas comecam vazias, JS preenche no load e a cada
+    # mudanca de angulo/posicao.
     ESTILO_PIN = {
         "lugares": dict(cor=MARCA_ROXO, simbolo="triangle-down"),
         "rios": dict(cor="#2E6F95", simbolo="circle"),
@@ -810,6 +834,11 @@ def main():
         // do anterior (< LIMIAR_SOBREPOSICAO_KM), reseta quando abre espaco.
         // Evita rotulo grudado em rotulo quando varios pins caem perto (ver
         // screenshot que o usuario mandou -- "Estrada Estrada Sao..." ilegivel).
+        // localidade (municipio) fica sempre em destaque -- maior e mais alta
+        // que rio/estrada por perto, mesmo dentro do mesmo cluster de
+        // sobreposicao (pedido explicito do usuario).
+        var BOOST_LUGARES_NIVEIS = 2;
+
         function atribuirAlturas(pontosOrdenados) {{
             var nivel = 0;
             pontosOrdenados.forEach(function(p, i) {{
@@ -818,7 +847,8 @@ def main():
                 }} else {{
                     nivel = 0;
                 }}
-                p.altura = ALTURA_PIN_M * (nivel + 1);
+                var nivelFinal = nivel + (p.tipo === 'lugares' ? N_NIVEIS_ALTURA + BOOST_LUGARES_NIVEIS : 0);
+                p.altura = ALTURA_PIN_M * (nivelFinal + 1);
             }});
         }}
 
@@ -827,7 +857,7 @@ def main():
         // posicao/elevacao real do cruzamento (a "posicao" pedida, nao so o
         // rotulo flutuando) e o marcador estilizado (com o nome) na ponta da
         // linha condutora, estilo balao de mapa.
-        function restylarPins(idxLinha, idxMarcador, pontos, corTipo, simboloTipo) {{
+        function restylarPins(idxLinha, idxMarcador, pontos, corTipo, simboloTipo, tamanhoTopo) {{
             var lx = [], ly = [], mx = [], my = [], texts = [], sizes = [], symbols = [], cores = [];
             pontos.forEach(function(p, i) {{
                 if (i > 0) {{ lx.push(NaN); ly.push(NaN); }}
@@ -836,8 +866,9 @@ def main():
                 ly.push(p.z, topo);
                 // ponto na posicao real (pequeno, sem rotulo)
                 mx.push(p.x); my.push(p.z); texts.push(''); sizes.push(5); symbols.push('circle'); cores.push(corTipo);
-                // ponto na ponta da linha condutora (estilizado, com o nome)
-                mx.push(p.x); my.push(topo); texts.push(p.nome); sizes.push(9); symbols.push(simboloTipo); cores.push(corTipo);
+                // ponto na ponta da linha condutora (estilizado, com o nome) --
+                // localidade fica maior (tamanhoTopo), em destaque sobre rio/estrada.
+                mx.push(p.x); my.push(topo); texts.push(p.nome); sizes.push(tamanhoTopo); symbols.push(simboloTipo); cores.push(corTipo);
             }});
             Plotly.restyle(gd, {{x: [lx], y: [ly]}}, [idxLinha]);
             Plotly.restyle(gd, {{
@@ -880,11 +911,11 @@ def main():
             atribuirAlturas(todos);
 
             restylarPins(IDX_PIN_LUGARES_LINHA, IDX_PIN_LUGARES_MARCADOR,
-                todos.filter(function(pt) {{ return pt.tipo === 'lugares'; }}), '{MARCA_ROXO}', 'triangle-down');
+                todos.filter(function(pt) {{ return pt.tipo === 'lugares'; }}), '{MARCA_ROXO}', 'triangle-down', 15);
             restylarPins(IDX_PIN_RIOS_LINHA, IDX_PIN_RIOS_MARCADOR,
-                todos.filter(function(pt) {{ return pt.tipo === 'rios'; }}), '#2E6F95', 'circle');
+                todos.filter(function(pt) {{ return pt.tipo === 'rios'; }}), '#2E6F95', 'circle', 9);
             restylarPins(IDX_PIN_ESTRADAS_LINHA, IDX_PIN_ESTRADAS_MARCADOR,
-                todos.filter(function(pt) {{ return pt.tipo === 'estradas'; }}), '#4A4A4A', 'square');
+                todos.filter(function(pt) {{ return pt.tipo === 'estradas'; }}), '#4A4A4A', 'square', 9);
         }}
 
         function atualizarEspessuras(a, p) {{
