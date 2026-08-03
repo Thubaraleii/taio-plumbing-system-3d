@@ -69,7 +69,7 @@ RESOLUCAO_GRID_TOPO = 63  # pontos por eixo, so para o render (nao afeta o GemPy
 # pra 110 quando a ferramenta de corte (frames por posicao) fez o HTML passar de 400MB
 EXAGERO_Z = 6.0  # fator de exagero vertical (relevo real e sutil frente a area horizontal)
 BASE_Z_ABSOLUTA = -600.0  # piso do "cubao" -- mesma cota usada em ../scripts/06_gerar_solidos_estilizados_cubao.py
-COR_SILL, COR_DIQUE = "#A63D2F", "#2B2B2B"  # paleta exata
+COR_SILL, COR_DIQUE = "#A63D2F", "#1B4332"  # paleta exata (dique = verde escuro)
 ESPESSURA_SILL_ESTILIZADA = 400.0  # mesma de ../scripts/06_gerar_solidos_estilizados_cubao.py
 PASSO_DENSIFICACAO = 40.0  # mesma de ../scripts/06_gerar_solidos_estilizados_cubao.py -- so
 # pro CORPO SOLIDO do sill/dique (construir_solido), mantido fino de proposito: e o dado

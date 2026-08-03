@@ -79,7 +79,7 @@ def _hex_para_rgba(hex_cor: str):
 
 CORES_CAMADAS = [_hex_para_rgba(h) for h in ("#D6C79A", "#8C8C86", "#3E362C", "#B5AE93", "#C9A66B")]
 COR_SILL = _hex_para_rgba("#A63D2F")
-COR_DIQUE = _hex_para_rgba("#2B2B2B")
+COR_DIQUE = _hex_para_rgba("#1B4332")  # verde escuro
 
 # deposito quaternario (aluviao de vale): usa a cota real do terreno como
 # proxy -- so aparece onde o relevo fica abaixo do limiar (~10% mais baixo
