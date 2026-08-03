@@ -775,6 +775,11 @@ def main():
             Plotly.relayout(gd, patch);
             Plotly.restyle(gd, {{'line.color': t.texto}}, [IDX_TRACE_TERRENO]);
             Plotly.restyle(gd, {{'textfont.color': t.texto}}, [IDX_TRACE_BARRA]);
+            // rotulos dos pins (nome da localidade/rio/estrada na secao) tambem
+            // tem cor propria fixa na criacao -- sem isso ficavam ilegiveis no
+            // tema claro (texto claro sobre fundo claro).
+            Plotly.restyle(gd, {{'textfont.color': t.texto}},
+                [IDX_PIN_LUGARES_MARCADOR, IDX_PIN_RIOS_MARCADOR, IDX_PIN_ESTRADAS_MARCADOR]);
             document.body.style.background = t.paper;
         }}
 
