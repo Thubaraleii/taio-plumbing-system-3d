@@ -14,6 +14,7 @@ Gera:
     visualizacao_web/secao_interativa.html
 """
 import base64
+import math
 from pathlib import Path
 
 import geopandas as gpd
@@ -23,7 +24,7 @@ import rasterio.features
 from affine import Affine
 from plotly.subplots import make_subplots
 from scipy.interpolate import LinearNDInterpolator, NearestNDInterpolator, griddata
-from shapely.geometry import Point, shape as shapely_shape
+from shapely.geometry import LineString, Point, shape as shapely_shape
 from shapely.geometry.polygon import orient
 from shapely.ops import unary_union
 
@@ -31,6 +32,9 @@ BASE = Path(r"C:\Users\thuba\Desktop\Mestrado\1_Modelo_3D_Taio")
 TOPO_NPY = BASE / "dados_entrada" / "topografia_drone" / "topografia_xyz.npy"
 POLIGONO_REFERENCIA = BASE.parent / "2_Banco_de_Dados" / "dados_base" / "poligon_intrusiva.shp"
 POLIGONOS_CPRM_GEOJSON = BASE.parent / "2_Banco_de_Dados" / "saida_processada" / "formacoes_cprm_poligonos.geojson"
+OSM_RIOS_GEOJSON = BASE.parent / "2_Banco_de_Dados" / "saida_processada" / "osm_rios.geojson"
+OSM_ESTRADAS_GEOJSON = BASE.parent / "2_Banco_de_Dados" / "saida_processada" / "osm_estradas.geojson"
+OSM_LUGARES_GEOJSON = BASE.parent / "2_Banco_de_Dados" / "saida_processada" / "osm_lugares.geojson"
 LOGO_PATH = Path(__file__).parent / "assets" / "logo_gstech.jpg"
 OUT_HTML = Path(__file__).parent / "secao_interativa.html"
 
@@ -160,6 +164,27 @@ def banda_toself(dists, topo, base, mask=None):
     return x, y
 
 
+def linhas_para_scatter_xy(gdf):
+    """Todas as linhas (rios/estradas) de um GeoDataFrame como um unico par
+    x,y pra um Scatter mode='lines' -- cada trecho separado por NaN (mesma
+    logica de sub-caminhos separados usada em poligono_para_scatter_xy/
+    faixas_contiguas). Um trace so, em vez de um por feature, pra nao
+    multiplicar o numero de traces (rios sozinho tem quase 6 mil trechos)."""
+    xs, ys = [], []
+    primeiro = True
+    for geom in gdf.geometry:
+        partes = geom.geoms if hasattr(geom, "geoms") else [geom]
+        for parte in partes:
+            if not primeiro:
+                xs.append(np.nan)
+                ys.append(np.nan)
+            primeiro = False
+            coords = np.array(parte.coords)
+            xs.extend(coords[:, 0])
+            ys.extend(coords[:, 1])
+    return np.array(xs), np.array(ys)
+
+
 def poligono_para_scatter_xy(geom):
     """Contorno de um poligono/multipoligono (COM buracos) como x,y pra um
     Scatter com fill='toself' -- cada anel (exterior + buracos) vira um
@@ -252,6 +277,43 @@ def amostrar_linha(cx_linha, cy_linha, dx, dy, s_vals, elevacao, sill_geom, diqu
     return dados
 
 
+def calcular_cruzamentos(xs, ys, gdf, sindex, elevacao):
+    """Pontos onde a linha de corte atual (xs,ys, ja amostrada) cruza as
+    features de um GeoDataFrame (rios ou estradas) -- usa o indice espacial
+    (sindex) pra so testar intersecao real contra os poucos candidatos perto
+    da linha, nao contra todas as milhares de features. Devolve lista de
+    (distancia_km_no_perfil, elevacao_real, nome) -- so cruzamentos com nome
+    real no OSM (sem nome vira pin demais, poluia o grafico -- usuario testou
+    "todos" e pediu pra voltar a so nomeados)."""
+    linha = LineString(zip(xs, ys))
+    candidatos = list(sindex.query(linha))
+    vistos = set()
+    cruzamentos = []
+    for i in candidatos:
+        geom = gdf.geometry.iloc[i]
+        inter = linha.intersection(geom)
+        if inter.is_empty:
+            continue
+        pontos = list(inter.geoms) if hasattr(inter, "geoms") else [inter]
+        for pt in pontos:
+            if pt.geom_type != "Point":
+                continue
+            # posicao ao longo do perfil: projeta o ponto de intersecao no
+            # mesmo parametro usado pra "dists" (distancia real desde xs[0]/ys[0])
+            s = math.hypot(pt.x - xs[0], pt.y - ys[0])
+            s_km = s / 1000
+            nome = gdf["name"].iloc[i] if "name" in gdf.columns else None
+            if not (isinstance(nome, str) and nome.strip()):
+                continue  # so cruzamentos com nome -- sem nome ficava poluido demais (todo trecho vira pin)
+            chave = (round(s_km, 2), nome)
+            if chave in vistos:
+                continue
+            vistos.add(chave)
+            cruzamentos.append((s_km, float(elevacao(pt.x, pt.y)), nome))
+    cruzamentos.sort(key=lambda c: c[0])
+    return cruzamentos
+
+
 _CHAVES_CAMADAS = [f"camada{k}" for k in range(len(PROFUNDIDADE_CAMADAS) - 1)]
 ORDEM_TRACES = ["linha_mapa"] + _CHAVES_CAMADAS + ["quaternario", "sill", "dique", "terreno"]
 CORES_TRACES = {chave: CORES_CAMADAS[k] for k, chave in enumerate(_CHAVES_CAMADAS)}
@@ -262,8 +324,12 @@ NOMES_TRACES.update({
 })
 # ordem estratigrafica da legenda, igual ao 3D (gerar_visualizador_3d.py): deposito
 # quaternario, depois sill/dique, depois as 5 formacoes sedimentares reais.
-LEGENDRANK_TRACES = {"quaternario": 1, "sill": 2, "dique": 3}
-LEGENDRANK_TRACES.update({chave: 4 + k for k, chave in enumerate(_CHAVES_CAMADAS)})
+# ordem da legenda: ponto (localidades) -> linha (rios/estradas) -> poligono
+# (deposito/soleira/dique/formacoes), ranks 1-3 reservados pros dois primeiros
+# grupos (ver LEGENDRANK_OSM mais abaixo).
+LEGENDRANK_TRACES = {"quaternario": 4, "sill": 5, "dique": 6}
+LEGENDRANK_TRACES.update({chave: 7 + k for k, chave in enumerate(_CHAVES_CAMADAS)})
+LEGENDRANK_OSM = {"lugares": 1, "rios": 2, "estradas": 3}
 
 
 def main():
@@ -295,15 +361,35 @@ def main():
             t_vals=t_vals,
         ))
 
+    gdf_rios_cx = gpd.read_file(OSM_RIOS_GEOJSON) if OSM_RIOS_GEOJSON.exists() else None
+    gdf_estradas_cx = gpd.read_file(OSM_ESTRADAS_GEOJSON) if OSM_ESTRADAS_GEOJSON.exists() else None
+
     print(f"Pre-calculando {len(ANGULOS)} angulos, passo de {PASSO_POSICAO:.0f}m...")
     todas_secoes = []
+    todas_pins_rios = []
+    todas_pins_estradas = []
     for info in angulos_info:
         secoes_angulo = []
+        pins_rios_angulo = []
+        pins_estradas_angulo = []
         for t in info["t_vals"]:
             cx_linha, cy_linha = CX + t * info["px"], CY + t * info["py"]
-            secoes_angulo.append(amostrar_linha(cx_linha, cy_linha, info["dx"], info["dy"], info["s_vals"],
-                                                  elevacao, sill_geom, dique_geom))
+            secao = amostrar_linha(cx_linha, cy_linha, info["dx"], info["dy"], info["s_vals"],
+                                    elevacao, sill_geom, dique_geom)
+            secoes_angulo.append(secao)
+            xs_linha = cx_linha + info["s_vals"] * info["dx"]
+            ys_linha = cy_linha + info["s_vals"] * info["dy"]
+            if gdf_rios_cx is not None:
+                pins_rios_angulo.append(calcular_cruzamentos(xs_linha, ys_linha, gdf_rios_cx, gdf_rios_cx.sindex, elevacao))
+            else:
+                pins_rios_angulo.append([])
+            if gdf_estradas_cx is not None:
+                pins_estradas_angulo.append(calcular_cruzamentos(xs_linha, ys_linha, gdf_estradas_cx, gdf_estradas_cx.sindex, elevacao))
+            else:
+                pins_estradas_angulo.append([])
         todas_secoes.append(secoes_angulo)
+        todas_pins_rios.append(pins_rios_angulo)
+        todas_pins_estradas.append(pins_estradas_angulo)
 
     n_pos_inicial = len(angulos_info[0]["t_vals"])
     inicial = todas_secoes[0][n_pos_inicial // 2]
@@ -352,6 +438,66 @@ def main():
             showlegend=False, visible=False, hoverinfo="none",
         ), row=1, col=1)
     idx_geo_mapa_fim = idx_geo_mapa_inicio + n_geo_mapa - 1
+
+    # camadas de referencia do OpenStreetMap (rios, estradas, localidades) --
+    # depois da geologia (desenham por cima da cor do terreno) e antes da
+    # linha do perfil (que precisa continuar visivel por cima de tudo no
+    # mapa). Um toggle so ("OSM: ON/OFF"), independente do modo de cor.
+    idx_osm_inicio = len(fig.data)
+    if OSM_RIOS_GEOJSON.exists():
+        gdf_rios = gpd.read_file(OSM_RIOS_GEOJSON)
+        rx, ry = linhas_para_scatter_xy(gdf_rios)
+        fig.add_trace(go.Scatter(
+            x=rx, y=ry, mode="lines", line=dict(color="#2E6F95", width=1),
+            name="Rios (OSM)", showlegend=True, visible=False, hoverinfo="none",
+            legendrank=LEGENDRANK_OSM["rios"],
+        ), row=1, col=1)
+    if OSM_ESTRADAS_GEOJSON.exists():
+        gdf_estradas = gpd.read_file(OSM_ESTRADAS_GEOJSON)
+        rx, ry = linhas_para_scatter_xy(gdf_estradas)
+        fig.add_trace(go.Scatter(
+            x=rx, y=ry, mode="lines", line=dict(color="#4A4A4A", width=1),
+            name="Estradas (OSM)", showlegend=True, visible=False, hoverinfo="none",
+            legendrank=LEGENDRANK_OSM["estradas"],
+        ), row=1, col=1)
+    # localidades/rios/estradas NAO viram rotulo no mapa (usuario pediu mapa
+    # sem rotulo) -- em vez disso ficam disponiveis pro JS projetar como
+    # "pin" na SECAO (row=1,col=2): uma linha condutora fina subindo da
+    # topografia real ate um pouco acima dela, com o marcador+nome na ponta
+    # (estilo pin de mapa). Localidades sao projetadas continuamente (jeito
+    # qualquer deslocamento/angulo, ver atualizarPins); rios/estradas usam
+    # cruzamento real da linha de corte (precomputado por posicao em
+    # calcular_cruzamentos, so existe nos PASSO_POSICAO discretos).
+    # 2 traces por tipo (linha condutora + marcador/texto), todas comecam
+    # vazias, JS preenche no load e a cada mudanca de angulo/posicao.
+    localidades_dados = []
+    if OSM_LUGARES_GEOJSON.exists():
+        gdf_lugares = gpd.read_file(OSM_LUGARES_GEOJSON)
+        localidades_dados = list(zip(gdf_lugares["name"], gdf_lugares.geometry.x, gdf_lugares.geometry.y))
+
+    ESTILO_PIN = {
+        "lugares": dict(cor=MARCA_ROXO, simbolo="triangle-down"),
+        "rios": dict(cor="#2E6F95", simbolo="circle"),
+        "estradas": dict(cor="#4A4A4A", simbolo="square"),
+    }
+    idx_pin_traces = {}
+    for tipo in ("lugares", "rios", "estradas"):
+        estilo = ESTILO_PIN[tipo]
+        idx_pin_traces[f"{tipo}_linha"] = len(fig.data)
+        fig.add_trace(go.Scatter(
+            x=[], y=[], mode="lines", line=dict(color=estilo["cor"], width=1.5, dash="dot"),
+            showlegend=False, visible=False, hoverinfo="none",
+        ), row=1, col=2)
+        idx_pin_traces[f"{tipo}_marcador"] = len(fig.data)
+        fig.add_trace(go.Scatter(
+            x=[], y=[], mode="markers+text", textposition="top center",
+            textfont=dict(size=9, color=MARCA_CINZA_CLARO, family=MARCA_FONTE),
+            marker=dict(size=8, color=estilo["cor"], symbol=estilo["simbolo"], line=dict(color=MARCA_CINZA_CLARO, width=1)),
+            name={"lugares": "Localidades (OSM)", "rios": "Rios (OSM)", "estradas": "Estradas (OSM)"}[tipo],
+            showlegend=(tipo == "lugares"), visible=False, hoverinfo="none",
+            legendrank=LEGENDRANK_OSM[tipo],
+        ), row=1, col=2)
+    idx_osm_fim = len(fig.data) - 1
 
     idx_trace_terreno = None
     for chave in ORDEM_TRACES:
@@ -426,7 +572,7 @@ def main():
         font=dict(size=13, color=MARCA_CINZA_CLARO), xanchor="right",
     )
 
-    n_traces_fixas = 1 + n_geo_mapa  # heatmap + poligonos de geologia (+ quaternario) -- nao mudam entre frames
+    n_traces_fixas = idx_osm_fim + 1  # heatmap + poligonos de geologia (+ quaternario) + camadas OSM -- nao mudam entre frames
     frames = []
     for a, secoes_angulo in enumerate(todas_secoes):
         for p, secao in enumerate(secoes_angulo):
@@ -486,6 +632,10 @@ def main():
                          args=[{"visible": [False] + [True] * n_geo_mapa}, [0] + list(range(idx_geo_mapa_inicio, idx_geo_mapa_fim + 1))]),
                     dict(label="Tema: Escuro", method="skip"),
                     dict(label="Tema: Claro", method="skip"),
+                    dict(label="OSM: ON", method="restyle",
+                         args=[{"visible": True}, list(range(idx_osm_inicio, idx_osm_fim + 1))]),
+                    dict(label="OSM: OFF", method="restyle",
+                         args=[{"visible": False}, list(range(idx_osm_inicio, idx_osm_fim + 1))]),
                 ],
             ),
         ],
@@ -507,8 +657,8 @@ def main():
     )
 
     angulos_js = ",\n        ".join(
-        "{dx:%.6f, dy:%.6f, px:%.6f, py:%.6f, compKm:%.3f, dir0:'%s', dir1:'%s', t:[%s]}" % (
-            info["dx"], info["dy"], info["px"], info["py"],
+        "{dx:%.6f, dy:%.6f, px:%.6f, py:%.6f, s0:%.3f, compKm:%.3f, dir0:'%s', dir1:'%s', t:[%s]}" % (
+            info["dx"], info["dy"], info["px"], info["py"], info["s_vals"][0],
             (info["s_vals"][-1] - info["s_vals"][0]) / 1000,
             *extrair_direcoes(info["nome"]),
             ",".join(f"{t:.2f}" for t in info["t_vals"]),
@@ -520,6 +670,21 @@ def main():
         for secoes_angulo in todas_secoes
     )
     nomes_camadas_js = ",".join(f"'{nome}'" for nome in NOMES_CAMADAS)
+    localidades_js = ",".join(
+        "{nome:%r, x:%.1f, y:%.1f}" % (str(nome), x, y) for nome, x, y in localidades_dados
+    )
+
+    def cruzamentos_js(todas_pins):
+        return ",\n        ".join(
+            "[" + ",\n         ".join(
+                "[" + ",".join("{s:%.3f,z:%.1f,nome:%r}" % (s, z, str(nome)) for s, z, nome in pos) + "]"
+                for pos in pins_angulo
+            ) + "]"
+            for pins_angulo in todas_pins
+        )
+
+    pins_rios_js = cruzamentos_js(todas_pins_rios)
+    pins_estradas_js = cruzamentos_js(todas_pins_estradas)
     logo_b64 = logo_base64()
     marca_html = f"""
     (function() {{
@@ -550,8 +715,23 @@ def main():
         {espessuras_js}
         ];
         var NOMES_CAMADAS = [{nomes_camadas_js}];
+        var LOCALIDADES = [{localidades_js}];
+        var PINS_RIOS = [
+        {pins_rios_js}
+        ];
+        var PINS_ESTRADAS = [
+        {pins_estradas_js}
+        ];
+        var LIMIAR_PIN_M = 2000;  // so vira pin se a linha de corte passar a menos de 2km da localidade
+        var ALTURA_PIN_M = 60;  // marcador fica esse tanto (metros) acima da topografia real
         var IDX_TRACE_BARRA = {idx_trace_barra};
         var IDX_TRACE_TERRENO = {idx_trace_terreno};
+        var IDX_PIN_LUGARES_LINHA = {idx_pin_traces["lugares_linha"]};
+        var IDX_PIN_LUGARES_MARCADOR = {idx_pin_traces["lugares_marcador"]};
+        var IDX_PIN_RIOS_LINHA = {idx_pin_traces["rios_linha"]};
+        var IDX_PIN_RIOS_MARCADOR = {idx_pin_traces["rios_marcador"]};
+        var IDX_PIN_ESTRADAS_LINHA = {idx_pin_traces["estradas_linha"]};
+        var IDX_PIN_ESTRADAS_MARCADOR = {idx_pin_traces["estradas_marcador"]};
         var IDX_ANOTACAO_DIR0 = {idx_anotacao_dir0};
         var IDX_ANOTACAO_DIR1 = {idx_anotacao_dir1};
         var IDX_ANOTACOES_SUBTITULO = [0, 1, 2];
@@ -598,10 +778,81 @@ def main():
             document.body.style.background = t.paper;
         }}
 
+        // elevacao real (interpolada) do terreno numa distancia x (km) do
+        // perfil ATUAL -- usa a propria trace do terreno (ja reflete o
+        // angulo/posicao em exibicao), busca linear (poucas centenas de
+        // pontos, ok pra rodar a cada mudanca de angulo/slider).
+        function interpolarElevacao(xKm) {{
+            var tr = gd._fullData[IDX_TRACE_TERRENO];
+            var tx = tr.x, ty = tr.y;
+            var n = tx.length;
+            if (xKm <= tx[0]) return ty[0];
+            if (xKm >= tx[n - 1]) return ty[n - 1];
+            for (var i = 0; i < n - 1; i++) {{
+                if (tx[i] <= xKm && xKm <= tx[i + 1]) {{
+                    var frac = (tx[i + 1] === tx[i]) ? 0 : (xKm - tx[i]) / (tx[i + 1] - tx[i]);
+                    return ty[i] + frac * (ty[i + 1] - ty[i]);
+                }}
+            }}
+            return ty[n - 1];
+        }}
+
+        // monta a linha condutora (base na topografia, ponta ALTURA_PIN_M acima)
+        // e o marcador/texto na ponta, pra um array de pontos {{xKm, zBase}} --
+        // estilo "pin" de mapa, cada trecho de linha separado por NaN.
+        function restylarPins(idxLinha, idxMarcador, pontos) {{
+            var lx = [], ly = [], mx = [], my = [], texts = [];
+            pontos.forEach(function(p, i) {{
+                if (i > 0) {{ lx.push(NaN); ly.push(NaN); }}
+                var topo = p.z + ALTURA_PIN_M;
+                lx.push(p.x, p.x);
+                ly.push(p.z, topo);
+                mx.push(p.x);
+                my.push(topo);
+                texts.push(p.nome);
+            }});
+            Plotly.restyle(gd, {{x: [lx], y: [ly]}}, [idxLinha]);
+            Plotly.restyle(gd, {{x: [mx], y: [my], text: [texts]}}, [idxMarcador]);
+        }}
+
+        // projeta cada localidade na linha de corte ATUAL (angulo a, deslocamento
+        // perpendicular offsetT) -- decompoe o vetor CX,CY->localidade na base
+        // ortonormal (dx,dy)/(px,py): a componente ao longo de (dx,dy) da a
+        // posicao na secao (mesmo "s" usado pra amostrar o perfil, indepen-
+        // dente de offsetT); a componente ao longo de (px,py) da a distancia
+        // perpendicular da localidade ATE a linha center (CX,CY) -- subtraindo
+        // offsetT da isso vira a distancia ate a linha JA deslocada. So vira
+        // pin se essa distancia perpendicular for pequena (LIMIAR_PIN_M). Rios
+        // e estradas usam cruzamento real pre-calculado (PINS_RIOS/PINS_ESTRADAS),
+        // ja tem a elevacao exata do ponto de cruzamento.
+        function atualizarPins(a, p) {{
+            var info = ANGULOS[a];
+            var offsetT = info.t[p];
+            var lugares = [];
+            LOCALIDADES.forEach(function(loc) {{
+                var vx = loc.x - CX, vy = loc.y - CY;
+                var s = vx * info.dx + vy * info.dy;
+                var tLoc = vx * info.px + vy * info.py;
+                var perp = tLoc - offsetT;
+                if (Math.abs(perp) <= LIMIAR_PIN_M) {{
+                    var xKm = (s - info.s0) / 1000;
+                    lugares.push({{x: xKm, z: interpolarElevacao(xKm), nome: loc.nome}});
+                }}
+            }});
+            restylarPins(IDX_PIN_LUGARES_LINHA, IDX_PIN_LUGARES_MARCADOR, lugares);
+
+            var rios = (PINS_RIOS[a][p] || []).map(function(c) {{ return {{x: c.s, z: c.z, nome: c.nome}}; }});
+            restylarPins(IDX_PIN_RIOS_LINHA, IDX_PIN_RIOS_MARCADOR, rios);
+
+            var estradas = (PINS_ESTRADAS[a][p] || []).map(function(c) {{ return {{x: c.s, z: c.z, nome: c.nome}}; }});
+            restylarPins(IDX_PIN_ESTRADAS_LINHA, IDX_PIN_ESTRADAS_MARCADOR, estradas);
+        }}
+
         function atualizarEspessuras(a, p) {{
             var vals = ESPESSURAS[a][p];
             var rotulos = vals.map(function(v) {{ return Math.round(v) + 'm'; }});
             Plotly.restyle(gd, {{y: [vals], text: [rotulos]}}, [IDX_TRACE_BARRA]);
+            atualizarPins(a, p);
         }}
 
         // forca o estado inicial (posicao central) -- o slider as vezes
