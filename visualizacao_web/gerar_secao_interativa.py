@@ -89,7 +89,7 @@ TREND_A, TREND_B = 0.01034, -0.00025
 TREND_X0, TREND_Y0 = 592300.0, 7015058.8
 Z_REF_TILT = 1053.5  # ancora o plano em boundary(prof=350) = 703.5 (media real do contato Teresina/Serra Alta)
 COR_SILL = "#A63D2F"
-COR_DIQUE = "#2B2B2B"
+COR_DIQUE = "#1B4332"  # verde escuro
 COR_QUATERNARIO = "#D9CB82"
 ESPESSURA_SILL = 400.0
 QUATERNARIO_LIMIAR = 450.0
