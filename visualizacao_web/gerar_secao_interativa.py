@@ -565,8 +565,9 @@ def main():
             name="Pontos de Campo", showlegend=False, visible=False, legendgroup="campo",
         ), row=1, col=1)
         campo_dados_secao = [
-            (row.ponto_id, row.geometry.x, row.geometry.y, CORES_LITOLOGIA_CAMPO.get(row.litologia_padronizada, COR_LITOLOGIA_PADRAO))
-            for row in gdf_campo.itertuples()
+            (row.ponto_id, row.geometry.x, row.geometry.y,
+             CORES_LITOLOGIA_CAMPO.get(row.litologia_padronizada, COR_LITOLOGIA_PADRAO), hover)
+            for row, hover in zip(gdf_campo.itertuples(), hover_campo)
         ]
         idx_campo_pin_linha = len(fig.data)
         fig.add_trace(go.Scatter(
@@ -578,7 +579,7 @@ def main():
             x=[], y=[], mode="markers+text", textposition="top center",
             textfont=dict(size=9, color=MARCA_CINZA_CLARO, family=MARCA_FONTE),
             marker=dict(symbol="diamond", line=dict(color=MARCA_CINZA_CLARO, width=1)),
-            name="Pontos de Campo", showlegend=True, visible=False, hoverinfo="none",
+            name="Pontos de Campo", showlegend=True, visible=False, hoverinfo="text",
             legendrank=0, legendgroup="campo",
         ), row=1, col=2)
 
@@ -764,7 +765,8 @@ def main():
         "{nome:%r, x:%.1f, y:%.1f}" % (str(nome), x, y) for nome, x, y in localidades_dados
     )
     campo_js = ",".join(
-        "{nome:%r, x:%.1f, y:%.1f, cor:%r}" % (str(nome), x, y, cor) for nome, x, y, cor in campo_dados_secao
+        "{nome:%r, x:%.1f, y:%.1f, cor:%r, hover:%r}" % (str(nome), x, y, cor, hover)
+        for nome, x, y, cor, hover in campo_dados_secao
     )
 
     def cruzamentos_js(todas_pins):
@@ -931,7 +933,7 @@ def main():
         // rotulo flutuando) e o marcador estilizado (com o nome) na ponta da
         // linha condutora, estilo balao de mapa.
         function restylarPins(idxLinha, idxMarcador, pontos, corTipo, simboloTipo, tamanhoTopo) {{
-            var lx = [], ly = [], mx = [], my = [], texts = [], sizes = [], symbols = [], cores = [];
+            var lx = [], ly = [], mx = [], my = [], texts = [], sizes = [], symbols = [], cores = [], hovers = [];
             pontos.forEach(function(p, i) {{
                 if (i > 0) {{ lx.push(NaN); ly.push(NaN); }}
                 var topo = p.z + p.altura;
@@ -939,14 +941,16 @@ def main():
                 lx.push(p.x, p.x);
                 ly.push(p.z, topo);
                 // ponto na posicao real (pequeno, sem rotulo)
-                mx.push(p.x); my.push(p.z); texts.push(''); sizes.push(5); symbols.push('circle'); cores.push(cor);
+                mx.push(p.x); my.push(p.z); texts.push(''); sizes.push(5); symbols.push('circle'); cores.push(cor); hovers.push('');
                 // ponto na ponta da linha condutora (estilizado, com o nome) --
                 // localidade fica maior (tamanhoTopo), em destaque sobre rio/estrada.
+                // popup no hover so pra quem tem dado (p.hover, ex.: pontos de campo).
                 mx.push(p.x); my.push(topo); texts.push(p.nome); sizes.push(tamanhoTopo); symbols.push(simboloTipo); cores.push(cor);
+                hovers.push(p.hover || p.nome);
             }});
             Plotly.restyle(gd, {{x: [lx], y: [ly]}}, [idxLinha]);
             Plotly.restyle(gd, {{
-                x: [mx], y: [my], text: [texts],
+                x: [mx], y: [my], text: [texts], hovertext: [hovers],
                 'marker.size': [sizes], 'marker.symbol': [symbols], 'marker.color': [cores],
             }}, [idxMarcador]);
         }}
@@ -991,7 +995,7 @@ def main():
                 var perp = tLoc - offsetT;
                 if (Math.abs(perp) <= LIMIAR_PIN_CAMPO_M) {{
                     var xKm = (s - info.s0) / 1000;
-                    campo.push({{x: xKm, z: interpolarElevacao(xKm), nome: pt.nome, cor: pt.cor, tipo: 'campo'}});
+                    campo.push({{x: xKm, z: interpolarElevacao(xKm), nome: pt.nome, cor: pt.cor, hover: pt.hover, tipo: 'campo'}});
                 }}
             }});
 
