@@ -1254,6 +1254,8 @@ def main():
         // e forca de volta pro range padrao (X bate com o angulo atual).
         gd.on('plotly_doubleclick', function() {{
             Plotly.relayout(gd, {{
+                'xaxis.range': [{X_MIN}, {X_MAX}],
+                'yaxis.range': [{Y_MIN}, {Y_MAX}],
                 'xaxis2.range': [0, ANGULOS[anguloAtual].compKm],
                 'yaxis2.range': [-100, 1150],
             }});
