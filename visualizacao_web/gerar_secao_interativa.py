@@ -925,7 +925,7 @@ def main():
         var IDX_ESTRUTURAL_SIMBOLO = {idx_estrutural_simbolo};
         var LIMIAR_ESTRUTURAL_M = 400;  // mesmo limiar apertado dos pontos de campo
         var Y_MIN_SECAO = -600;  // fundo fixo do risco -- o topo agora segue a topografia real
-        var TAMANHO_SIMBOLO_X_KM = 0.15;  // meia-largura do X em km no eixo horizontal da secao
+        var TAMANHO_SIMBOLO_X_KM = 0.09;  // largura de cada meia-seta em km no eixo horizontal da secao
         var IDX_ANOTACAO_DIR0 = {idx_anotacao_dir0};
         var IDX_ANOTACAO_DIR1 = {idx_anotacao_dir1};
         var IDX_ANOTACOES_SUBTITULO = [0, 1, 2];
@@ -1131,12 +1131,14 @@ def main():
                     if (xs.length > 0) {{ xs.push(NaN); ys.push(NaN); hovers.push(''); }}
                     xs.push(xKm, xKm); ys.push(Y_MIN_SECAO, yTopo);
                     hovers.push(pt.hover, pt.hover);
-                    // simbolo de falha (X) logo abaixo da topografia, junto a linha
+                    // simbolo de falha logo abaixo da topografia, junto a linha --
+                    // duas meias-setas menores partindo do proprio risco (uma pra
+                    // cada lado), nao mais um X inteiro cruzando por cima da linha.
                     if (xsSimbolo.length > 0) {{ xsSimbolo.push(NaN); ysSimbolo.push(NaN); }}
-                    var yBase = yTopo - 60, yFundoSimbolo = yTopo - 300;
-                    xsSimbolo.push(xKm - TAMANHO_SIMBOLO_X_KM, xKm + TAMANHO_SIMBOLO_X_KM, NaN,
-                                   xKm - TAMANHO_SIMBOLO_X_KM, xKm + TAMANHO_SIMBOLO_X_KM);
-                    ysSimbolo.push(yFundoSimbolo, yBase, NaN, yBase, yFundoSimbolo);
+                    var yBase = yTopo - 60, yFundoSimbolo = yTopo - 180;
+                    xsSimbolo.push(xKm - TAMANHO_SIMBOLO_X_KM, xKm, NaN,
+                                   xKm + TAMANHO_SIMBOLO_X_KM, xKm);
+                    ysSimbolo.push(yFundoSimbolo, yBase, NaN, yFundoSimbolo, yBase);
                 }}
             }});
             Plotly.restyle(gd, {{x: [xs], y: [ys], hovertext: [hovers]}}, [IDX_ESTRUTURAL_RISCO]);
