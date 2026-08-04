@@ -536,10 +536,15 @@ def main():
         ), row=1, col=2)
     idx_osm_fim = len(fig.data) - 1
 
-    # pontos de campo (catalogo unificado, 308 pontos reais medidos em campo)
-    # no mapa em planta -- coloridos por litologia_padronizada, popup no hover
-    # com dados da tabela de atributos. Toggle proprio, independente do OSM.
+    # pontos de campo (catalogo unificado, 308 pontos reais medidos em campo) --
+    # no mapa em planta (coloridos por litologia_padronizada, popup no hover) E
+    # como "pin" na SECAO (projetados na linha de corte atual, mesmo esquema
+    # das localidades OSM -- ver atualizarPins). Toggle proprio ("Campo:
+    # ON/OFF"), independente do OSM.
     idx_pontos_campo = None
+    idx_campo_pin_linha = None
+    idx_campo_pin_marcador = None
+    campo_dados_secao = []
     if PONTOS_CAMPO_GPKG.exists():
         gdf_campo = gpd.read_file(PONTOS_CAMPO_GPKG)
         cores_campo = [CORES_LITOLOGIA_CAMPO.get(lit, COR_LITOLOGIA_PADRAO) for lit in gdf_campo["litologia_padronizada"]]
@@ -557,8 +562,25 @@ def main():
             x=gdf_campo.geometry.x, y=gdf_campo.geometry.y, mode="markers",
             marker=dict(size=6, color=cores_campo, line=dict(color=MARCA_CINZA_CLARO, width=0.5)),
             text=hover_campo, hoverinfo="text",
-            name="Pontos de Campo", showlegend=False, visible=False,
+            name="Pontos de Campo", showlegend=False, visible=False, legendgroup="campo",
         ), row=1, col=1)
+        campo_dados_secao = [
+            (row.ponto_id, row.geometry.x, row.geometry.y, CORES_LITOLOGIA_CAMPO.get(row.litologia_padronizada, COR_LITOLOGIA_PADRAO))
+            for row in gdf_campo.itertuples()
+        ]
+        idx_campo_pin_linha = len(fig.data)
+        fig.add_trace(go.Scatter(
+            x=[], y=[], mode="lines", line=dict(color=MARCA_CINZA_CLARO, width=1, dash="dot"),
+            showlegend=False, visible=False, hoverinfo="none", legendgroup="campo",
+        ), row=1, col=2)
+        idx_campo_pin_marcador = len(fig.data)
+        fig.add_trace(go.Scatter(
+            x=[], y=[], mode="markers+text", textposition="top center",
+            textfont=dict(size=9, color=MARCA_CINZA_CLARO, family=MARCA_FONTE),
+            marker=dict(symbol="diamond", line=dict(color=MARCA_CINZA_CLARO, width=1)),
+            name="Pontos de Campo", showlegend=True, visible=False, hoverinfo="none",
+            legendrank=0, legendgroup="campo",
+        ), row=1, col=2)
 
     idx_trace_terreno = None
     for chave in ORDEM_TRACES:
@@ -635,7 +657,7 @@ def main():
 
     # heatmap + poligonos de geologia (+ quaternario) + camadas OSM + pontos de campo (se existir) --
     # nenhuma dessas traces muda entre frames, entao os frames de corte comecam logo depois delas.
-    n_traces_fixas = (idx_pontos_campo + 1) if idx_pontos_campo is not None else (idx_osm_fim + 1)
+    n_traces_fixas = (idx_campo_pin_marcador + 1) if idx_pontos_campo is not None else (idx_osm_fim + 1)
     frames = []
     for a, secoes_angulo in enumerate(todas_secoes):
         for p, secao in enumerate(secoes_angulo):
@@ -700,8 +722,10 @@ def main():
                     dict(label="OSM: OFF", method="restyle",
                          args=[{"visible": False}, list(range(idx_osm_inicio, idx_osm_fim + 1))]),
                 ] + ([
-                    dict(label="Campo: ON", method="restyle", args=[{"visible": True}, [idx_pontos_campo]]),
-                    dict(label="Campo: OFF", method="restyle", args=[{"visible": False}, [idx_pontos_campo]]),
+                    dict(label="Campo: ON", method="restyle",
+                         args=[{"visible": True}, [idx_pontos_campo, idx_campo_pin_linha, idx_campo_pin_marcador]]),
+                    dict(label="Campo: OFF", method="restyle",
+                         args=[{"visible": False}, [idx_pontos_campo, idx_campo_pin_linha, idx_campo_pin_marcador]]),
                 ] if idx_pontos_campo is not None else []),
             ),
         ],
@@ -738,6 +762,9 @@ def main():
     nomes_camadas_js = ",".join(f"'{nome}'" for nome in NOMES_CAMADAS)
     localidades_js = ",".join(
         "{nome:%r, x:%.1f, y:%.1f}" % (str(nome), x, y) for nome, x, y in localidades_dados
+    )
+    campo_js = ",".join(
+        "{nome:%r, x:%.1f, y:%.1f, cor:%r}" % (str(nome), x, y, cor) for nome, x, y, cor in campo_dados_secao
     )
 
     def cruzamentos_js(todas_pins):
@@ -782,6 +809,7 @@ def main():
         ];
         var NOMES_CAMADAS = [{nomes_camadas_js}];
         var LOCALIDADES = [{localidades_js}];
+        var PONTOS_CAMPO_SECAO = [{campo_js}];
         var PINS_RIOS = [
         {pins_rios_js}
         ];
@@ -789,6 +817,7 @@ def main():
         {pins_estradas_js}
         ];
         var LIMIAR_PIN_M = 2000;  // so vira pin se a linha de corte passar a menos de 2km da localidade
+        var LIMIAR_PIN_CAMPO_M = 400;  // pontos de campo sao 308 -- limiar bem mais apertado que localidades
         var ALTURA_PIN_M = 60;  // marcador fica esse tanto (metros) acima da topografia real
         var IDX_TRACE_BARRA = {idx_trace_barra};
         var IDX_TRACE_TERRENO = {idx_trace_terreno};
@@ -798,6 +827,8 @@ def main():
         var IDX_PIN_RIOS_MARCADOR = {idx_pin_traces["rios_marcador"]};
         var IDX_PIN_ESTRADAS_LINHA = {idx_pin_traces["estradas_linha"]};
         var IDX_PIN_ESTRADAS_MARCADOR = {idx_pin_traces["estradas_marcador"]};
+        var IDX_CAMPO_PIN_LINHA = {idx_campo_pin_linha};
+        var IDX_CAMPO_PIN_MARCADOR = {idx_campo_pin_marcador};
         var IDX_ANOTACAO_DIR0 = {idx_anotacao_dir0};
         var IDX_ANOTACAO_DIR1 = {idx_anotacao_dir1};
         var IDX_ANOTACOES_SUBTITULO = [0, 1, 2];
@@ -904,13 +935,14 @@ def main():
             pontos.forEach(function(p, i) {{
                 if (i > 0) {{ lx.push(NaN); ly.push(NaN); }}
                 var topo = p.z + p.altura;
+                var cor = p.cor || corTipo;  // pontos de campo tem cor propria (por litologia)
                 lx.push(p.x, p.x);
                 ly.push(p.z, topo);
                 // ponto na posicao real (pequeno, sem rotulo)
-                mx.push(p.x); my.push(p.z); texts.push(''); sizes.push(5); symbols.push('circle'); cores.push(corTipo);
+                mx.push(p.x); my.push(p.z); texts.push(''); sizes.push(5); symbols.push('circle'); cores.push(cor);
                 // ponto na ponta da linha condutora (estilizado, com o nome) --
                 // localidade fica maior (tamanhoTopo), em destaque sobre rio/estrada.
-                mx.push(p.x); my.push(topo); texts.push(p.nome); sizes.push(tamanhoTopo); symbols.push(simboloTipo); cores.push(corTipo);
+                mx.push(p.x); my.push(topo); texts.push(p.nome); sizes.push(tamanhoTopo); symbols.push(simboloTipo); cores.push(cor);
             }});
             Plotly.restyle(gd, {{x: [lx], y: [ly]}}, [idxLinha]);
             Plotly.restyle(gd, {{
@@ -948,7 +980,22 @@ def main():
             var rios = (PINS_RIOS[a][p] || []).map(function(c) {{ return {{x: c.s, z: c.z, nome: c.nome, tipo: 'rios'}}; }});
             var estradas = (PINS_ESTRADAS[a][p] || []).map(function(c) {{ return {{x: c.s, z: c.z, nome: c.nome, tipo: 'estradas'}}; }});
 
-            var todos = lugares.concat(rios, estradas);
+            // pontos de campo: mesma projecao continua das localidades, mas com
+            // limiar bem mais apertado (LIMIAR_PIN_CAMPO_M) -- sao 308 pontos, um
+            // limiar igual ao das localidades inundaria a secao de pins.
+            var campo = [];
+            PONTOS_CAMPO_SECAO.forEach(function(pt) {{
+                var vx = pt.x - CX, vy = pt.y - CY;
+                var s = vx * info.dx + vy * info.dy;
+                var tLoc = vx * info.px + vy * info.py;
+                var perp = tLoc - offsetT;
+                if (Math.abs(perp) <= LIMIAR_PIN_CAMPO_M) {{
+                    var xKm = (s - info.s0) / 1000;
+                    campo.push({{x: xKm, z: interpolarElevacao(xKm), nome: pt.nome, cor: pt.cor, tipo: 'campo'}});
+                }}
+            }});
+
+            var todos = lugares.concat(rios, estradas, campo);
             todos.sort(function(a, b) {{ return a.x - b.x; }});
             atribuirAlturas(todos);
 
@@ -958,6 +1005,8 @@ def main():
                 todos.filter(function(pt) {{ return pt.tipo === 'rios'; }}), '#2E6F95', 'circle', 9);
             restylarPins(IDX_PIN_ESTRADAS_LINHA, IDX_PIN_ESTRADAS_MARCADOR,
                 todos.filter(function(pt) {{ return pt.tipo === 'estradas'; }}), '#4A4A4A', 'square', 9);
+            restylarPins(IDX_CAMPO_PIN_LINHA, IDX_CAMPO_PIN_MARCADOR,
+                todos.filter(function(pt) {{ return pt.tipo === 'campo'; }}), '{COR_LITOLOGIA_PADRAO}', 'diamond', 9);
         }}
 
         function atualizarEspessuras(a, p) {{
