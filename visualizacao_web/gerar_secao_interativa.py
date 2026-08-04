@@ -660,7 +660,7 @@ def main():
         ), row=1, col=2)
         idx_estrutural_simbolo = len(fig.data)
         fig.add_trace(go.Scatter(
-            x=[], y=[], mode="lines", line=dict(color="black", width=4),
+            x=[], y=[], mode="lines", line=dict(color="black", width=2.5),
             showlegend=False, visible=False, hoverinfo="none", legendgroup="estrutural",
         ), row=1, col=2)
 
@@ -925,9 +925,9 @@ def main():
         var IDX_ESTRUTURAL_SIMBOLO = {idx_estrutural_simbolo};
         var LIMIAR_ESTRUTURAL_M = 400;  // mesmo limiar apertado dos pontos de campo
         var Y_MIN_SECAO = -600;  // fundo fixo do risco -- o topo agora segue a topografia real
-        var GAP_SIMBOLO_KM = 0.025;  // buffer/gap entre cada meia-seta e o risco vertical
-        var ALTURA_SIMBOLO_M = 90;  // variacao vertical (altura) de cada meia-seta, em metros
-        var OFFSET_SIMBOLO_M = 70;  // deslocamento vertical entre as duas metades (efeito "fatiado")
+        var GAP_SIMBOLO_KM = 0.04;  // buffer/gap entre cada meia-seta e o risco vertical
+        var ALTURA_SIMBOLO_M = 220;  // variacao vertical (altura) de cada meia-seta, em metros -- maior pra ficar visivel na escala cheia (0-22km)
+        var OFFSET_SIMBOLO_M = 170;  // deslocamento vertical entre as duas metades (efeito "fatiado")
         var IDX_ANOTACAO_DIR0 = {idx_anotacao_dir0};
         var IDX_ANOTACAO_DIR1 = {idx_anotacao_dir1};
         var IDX_ANOTACOES_SUBTITULO = [0, 1, 2];
@@ -1122,7 +1122,7 @@ def main():
         // risco) de (x,y0) a (x,y1), mais UMA farpa curta no head (lado
         // externo, longe do risco) formando a ponta -- sem farpa do lado de
         // dentro, pra nao ficar com a seta "cheia"/dobrada em cima da linha.
-        var LARGURA_FARPA_KM = 0.045, ALTURA_FARPA_M = 45;
+        var LARGURA_FARPA_KM = 0.11, ALTURA_FARPA_M = 110;
         function adicionarMeiaSeta(xs, ys, x, y0, y1, ladoFarpa) {{
             if (xs.length > 0) {{ xs.push(NaN); ys.push(NaN); }}
             xs.push(x, x); ys.push(y0, y1);
@@ -1153,7 +1153,7 @@ def main():
                     // apontando pra baixo -- como se a seta tivesse sido cortada
                     // e deslocada pelo proprio risco (convencao geologica padrao
                     // de simbolo de falha em secao).
-                    var yCentro = yTopo - 120;
+                    var yCentro = yTopo - 300;
                     // cabo vertical de cada lado (90 graus, igual ao risco) --
                     // esquerda sobe, direita desce -- com a farpa apontando
                     // pra fora (longe da linha).
