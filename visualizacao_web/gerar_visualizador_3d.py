@@ -539,7 +539,7 @@ def main():
 
     fig = go.Figure()
 
-    OPACIDADE_INICIAL_TOPO = 0.7
+    OPACIDADE_INICIAL_TOPO = 1.0
     OPACIDADE_MIN_OP = 3  # piso do slider = 0.3 (abaixo disso a superficie "some" contra o fundo escuro)
     fig.add_trace(go.Surface(
         **estado_inicial["topografia"],
