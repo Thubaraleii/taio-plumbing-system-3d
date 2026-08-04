@@ -926,8 +926,8 @@ def main():
         var LIMIAR_ESTRUTURAL_M = 400;  // mesmo limiar apertado dos pontos de campo
         var Y_MIN_SECAO = -100;  // fundo fixo do risco -- bate com o novo limite inferior do eixo (topo segue a topografia real)
         var GAP_SIMBOLO_KM = 0.04;  // buffer/gap entre cada meia-seta e o risco vertical
-        var ALTURA_SIMBOLO_M = 220;  // variacao vertical (altura) de cada meia-seta, em metros -- maior pra ficar visivel na escala cheia (0-22km)
-        var OFFSET_SIMBOLO_M = 170;  // deslocamento vertical entre as duas metades (efeito "fatiado")
+        var ALTURA_SIMBOLO_M = 100;  // variacao vertical (altura) de cada meia-seta, em metros
+        var OFFSET_SIMBOLO_M = 80;  // deslocamento vertical entre as duas metades (efeito "fatiado")
         var IDX_ANOTACAO_DIR0 = {idx_anotacao_dir0};
         var IDX_ANOTACAO_DIR1 = {idx_anotacao_dir1};
         var IDX_ANOTACOES_SUBTITULO = [0, 1, 2];
@@ -1122,7 +1122,7 @@ def main():
         // risco) de (x,y0) a (x,y1), mais UMA farpa curta no head (lado
         // externo, longe do risco) formando a ponta -- sem farpa do lado de
         // dentro, pra nao ficar com a seta "cheia"/dobrada em cima da linha.
-        var LARGURA_FARPA_KM = 0.11, ALTURA_FARPA_M = 110;
+        var LARGURA_FARPA_KM = 0.05, ALTURA_FARPA_M = 50;
         function adicionarMeiaSeta(xs, ys, x, y0, y1, ladoFarpa) {{
             if (xs.length > 0) {{ xs.push(NaN); ys.push(NaN); }}
             xs.push(x, x); ys.push(y0, y1);
@@ -1153,7 +1153,7 @@ def main():
                     // apontando pra baixo -- como se a seta tivesse sido cortada
                     // e deslocada pelo proprio risco (convencao geologica padrao
                     // de simbolo de falha em secao).
-                    var yCentro = yTopo - 300;
+                    var yCentro = yTopo - 150;
                     // cabo vertical de cada lado (90 graus, igual ao risco) --
                     // esquerda sobe, direita desce -- com a farpa apontando
                     // pra fora (longe da linha).
