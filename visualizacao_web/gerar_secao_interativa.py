@@ -660,7 +660,7 @@ def main():
         ), row=1, col=2)
         idx_estrutural_simbolo = len(fig.data)
         fig.add_trace(go.Scatter(
-            x=[], y=[], mode="lines", line=dict(color="black", width=3),
+            x=[], y=[], mode="lines", line=dict(color="black", width=4),
             showlegend=False, visible=False, hoverinfo="none", legendgroup="estrutural",
         ), row=1, col=2)
 
@@ -925,7 +925,10 @@ def main():
         var IDX_ESTRUTURAL_SIMBOLO = {idx_estrutural_simbolo};
         var LIMIAR_ESTRUTURAL_M = 400;  // mesmo limiar apertado dos pontos de campo
         var Y_MIN_SECAO = -600;  // fundo fixo do risco -- o topo agora segue a topografia real
-        var TAMANHO_SIMBOLO_X_KM = 0.09;  // largura de cada meia-seta em km no eixo horizontal da secao
+        var TAMANHO_SIMBOLO_X_KM = 0.09;  // comprimento (largura) de cada meia-seta, km no eixo da secao
+        var GAP_SIMBOLO_KM = 0.025;  // buffer/gap entre cada meia-seta e o risco vertical
+        var ALTURA_SIMBOLO_M = 90;  // variacao vertical (altura) de cada meia-seta, em metros
+        var OFFSET_SIMBOLO_M = 70;  // deslocamento vertical entre as duas metades (efeito "fatiado")
         var IDX_ANOTACAO_DIR0 = {idx_anotacao_dir0};
         var IDX_ANOTACAO_DIR1 = {idx_anotacao_dir1};
         var IDX_ANOTACOES_SUBTITULO = [0, 1, 2];
@@ -1116,6 +1119,16 @@ def main():
         // topografia real naquele x (interpolarElevacao) -- nao ultrapassa
         // o relevo, so risca por baixo dele. Sem inclinacao por mergulho de
         // proposito pros pontos sem dip medido (lineamento de satelite).
+        // desenha uma meia-seta: cabo (tail->head) mais duas farpas curtas no
+        // head formando a ponta da seta, apontando na direcao tail->head.
+        function adicionarMeiaSeta(xs, ys, x0, y0, x1, y1) {{
+            if (xs.length > 0) {{ xs.push(NaN); ys.push(NaN); }}
+            xs.push(x0, x1); ys.push(y0, y1);
+            var dxKm = x1 - x0, dyM = y1 - y0;
+            xs.push(NaN, x1, x1 - dxKm * 0.55); ys.push(NaN, y1, y1 - dyM * 0.15);
+            xs.push(NaN, x1, x1 - dxKm * 0.15); ys.push(NaN, y1, y1 - dyM * 0.55);
+        }}
+
         function atualizarEstrutural(a, offsetT) {{
             var info = ANGULOS[a];
             var xs = [], ys = [], hovers = [];
@@ -1131,14 +1144,22 @@ def main():
                     if (xs.length > 0) {{ xs.push(NaN); ys.push(NaN); hovers.push(''); }}
                     xs.push(xKm, xKm); ys.push(Y_MIN_SECAO, yTopo);
                     hovers.push(pt.hover, pt.hover);
-                    // simbolo de falha logo abaixo da topografia, junto a linha --
-                    // duas meias-setas menores partindo do proprio risco (uma pra
-                    // cada lado), nao mais um X inteiro cruzando por cima da linha.
-                    if (xsSimbolo.length > 0) {{ xsSimbolo.push(NaN); ysSimbolo.push(NaN); }}
-                    var yBase = yTopo - 60, yFundoSimbolo = yTopo - 180;
-                    xsSimbolo.push(xKm - TAMANHO_SIMBOLO_X_KM, xKm, NaN,
-                                   xKm + TAMANHO_SIMBOLO_X_KM, xKm);
-                    ysSimbolo.push(yFundoSimbolo, yBase, NaN, yFundoSimbolo, yBase);
+                    // simbolo de falha logo abaixo da topografia -- uma seta
+                    // "fatiada" pelo risco: meia-seta subindo do lado esquerdo
+                    // (desgrudada da linha, com um pequeno buffer/gap) apontando
+                    // pra cima, e a outra metade descendo do lado direito
+                    // apontando pra baixo -- como se a seta tivesse sido cortada
+                    // e deslocada pelo proprio risco (convencao geologica padrao
+                    // de simbolo de falha em secao).
+                    var yCentro = yTopo - 120;
+                    // ponta (arrowhead) na extremidade EXTERNA, longe do risco --
+                    // esquerda aponta subindo pra fora, direita aponta descendo pra fora.
+                    adicionarMeiaSeta(xsSimbolo, ysSimbolo,
+                        xKm - GAP_SIMBOLO_KM, yCentro - OFFSET_SIMBOLO_M / 2,
+                        xKm - GAP_SIMBOLO_KM - TAMANHO_SIMBOLO_X_KM, yCentro - OFFSET_SIMBOLO_M / 2 + ALTURA_SIMBOLO_M);
+                    adicionarMeiaSeta(xsSimbolo, ysSimbolo,
+                        xKm + GAP_SIMBOLO_KM, yCentro + OFFSET_SIMBOLO_M / 2,
+                        xKm + GAP_SIMBOLO_KM + TAMANHO_SIMBOLO_X_KM, yCentro + OFFSET_SIMBOLO_M / 2 - ALTURA_SIMBOLO_M);
                 }}
             }});
             Plotly.restyle(gd, {{x: [xs], y: [ys], hovertext: [hovers]}}, [IDX_ESTRUTURAL_RISCO]);
