@@ -911,6 +911,9 @@ def main():
         var LIMIAR_PIN_M = 2000;  // so vira pin se a linha de corte passar a menos de 2km da localidade
         var LIMIAR_PIN_CAMPO_M = 400;  // pontos de campo sao 308 -- limiar bem mais apertado que localidades
         var ALTURA_PIN_M = 60;  // marcador fica esse tanto (metros) acima da topografia real
+        var TETO_PIN_M = 1100;  // ceiling absoluto -- evita que o pin (principalmente localidade,
+                                 // que pode escalonar bem alto com o boost) suba pra fora do eixo Y
+                                 // (range vai ate 1150) e "suma" da visualizacao
         var IDX_TRACE_BARRA = {idx_trace_barra};
         var IDX_TRACE_TERRENO = {idx_trace_terreno};
         var IDX_PIN_LUGARES_LINHA = {idx_pin_traces["lugares_linha"]};
@@ -1034,7 +1037,7 @@ def main():
             var lx = [], ly = [], mx = [], my = [], texts = [], sizes = [], symbols = [], cores = [], hovers = [];
             pontos.forEach(function(p, i) {{
                 if (i > 0) {{ lx.push(NaN); ly.push(NaN); }}
-                var topo = p.z + p.altura;
+                var topo = Math.min(p.z + p.altura, TETO_PIN_M);
                 var cor = p.cor || corTipo;  // pontos de campo tem cor propria (por litologia)
                 lx.push(p.x, p.x);
                 ly.push(p.z, topo);
@@ -1219,6 +1222,17 @@ def main():
 
         gd.on('plotly_buttonclicked', function(ev) {{
             if (typeof ev.active !== 'number') return;
+            // ev.active e sempre LOCAL ao menu clicado, nao global -- com 2
+            // linhas de updatemenus (angulo/mapa/tema na primeira, OSM/campo/
+            // estrutura na segunda), sem checar QUAL menu disparou o evento,
+            // um clique em "OSM: ON" (ev.active=0 na 2a linha) seria
+            // interpretado aqui como clique no botao de angulo 0 (Horizontal),
+            // forcando a secao de volta pro Horizontal sem o usuario pedir --
+            // esse era o bug de "trocar de aba bugava, tinha que ficar
+            // voltando". So processa eventos vindos da PRIMEIRA linha
+            // (angulo/mapa/tema); a segunda linha (OSM/campo/estrutura) so
+            // usa method='restyle' nativo, sem necessidade de JS aqui.
+            if (Math.abs(ev.menu.y - (-0.38)) > 0.01) return;
             if (ev.active < ANGULOS.length) {{
                 irParaAngulo(ev.active);
             }} else if (ev.active === ANGULOS.length + 2) {{
