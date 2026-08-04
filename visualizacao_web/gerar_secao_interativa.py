@@ -892,6 +892,8 @@ def main():
     {marca_html}
     (function() {{
         var CX = {CX}, CY = {CY};
+        var RANGE_MAPA_X = [{X_MIN}, {X_MAX}], RANGE_MAPA_Y = [{Y_MIN}, {Y_MAX}];
+        var RANGE_SECAO_Y = [-100, 1150];
         var ANGULOS = [
         {angulos_js}
         ];
@@ -1181,6 +1183,20 @@ def main():
             atualizarEstrutural(a, ANGULOS[a].t[p]);
         }}
 
+        // forca os eixos (mapa + secao) de volta pro recorte padrao definido --
+        // o Plotly recalcula range pelo extremo REAL dos dados (mesmo com
+        // autorange=False no layout inicial) sempre que um redraw acontece
+        // depois de trace/frame novo entrar em cena (animate inicial, toggle
+        // de OSM/campo/estrutura, duplo clique) -- sem isso o mapa/secao
+        // "vazam" pra fora do recorte (rios/estradas OSM v e o piso artificial
+        // do preenchimento do dique, bem mais fundo que a topografia real).
+        function resetarEixosPadrao() {{
+            Plotly.relayout(gd, {{
+                'xaxis.range': RANGE_MAPA_X, 'yaxis.range': RANGE_MAPA_Y,
+                'xaxis2.range': [0, ANGULOS[anguloAtual].compKm], 'yaxis2.range': RANGE_SECAO_Y,
+            }});
+        }}
+
         // forca o estado inicial (posicao central) -- o slider as vezes
         // "deriva" pro ultimo step sozinho no load (comportamento estranho
         // do Plotly com varios steps sem "value" explicito).
@@ -1188,6 +1204,7 @@ def main():
         Plotly.animate(gd, ['0_' + posMeioInicial], {{mode: 'immediate', frame: {{duration: 0, redraw: true}}, transition: {{duration: 0}}}});
         Plotly.relayout(gd, {{'sliders[0].active': posMeioInicial}});
         atualizarEspessuras(0, posMeioInicial);
+        resetarEixosPadrao();
 
         function stepsParaAngulo(a) {{
             var info = ANGULOS[a];
@@ -1233,33 +1250,39 @@ def main():
             // voltando". So processa eventos vindos da PRIMEIRA linha
             // (angulo/mapa/tema); a segunda linha (OSM/campo/estrutura) so
             // usa method='restyle' nativo, sem necessidade de JS aqui.
-            if (Math.abs(ev.menu.y - (-0.38)) > 0.01) return;
-            if (ev.active < ANGULOS.length) {{
-                irParaAngulo(ev.active);
-            }} else if (ev.active === ANGULOS.length + 2) {{
-                aplicarTema('escuro');
-            }} else if (ev.active === ANGULOS.length + 3) {{
-                aplicarTema('claro');
+            if (Math.abs(ev.menu.y - (-0.38)) <= 0.01) {{
+                if (ev.active < ANGULOS.length) {{
+                    irParaAngulo(ev.active);
+                }} else if (ev.active === ANGULOS.length + 2) {{
+                    aplicarTema('escuro');
+                }} else if (ev.active === ANGULOS.length + 3) {{
+                    aplicarTema('claro');
+                }}
+                // botoes "Mapa: Hipsometria/Geologia" (ANGULOS.length, +1) usam
+                // method='restyle' proprio, nao precisam de JS aqui.
             }}
-            // botoes "Mapa: Hipsometria/Geologia" (ANGULOS.length, +1) usam
-            // method='restyle' proprio, nao precisam de JS aqui.
+            // QUALQUER clique de botao (linha 1 ou 2) pode disparar um redraw
+            // interno do Plotly que desalinha os eixos do recorte padrao (o
+            // mesmo problema do duplo-clique, ver resetarEixosPadrao) --
+            // reforca depois que o restyle/relayout nativo do botao ja
+            // terminou (delay real, nao so setTimeout(0) -- ver comentario
+            // no handler de plotly_doubleclick), sem interferir em zoom/pan
+            // manual do usuario via mouse (que nao passa por aqui).
+            setTimeout(resetarEixosPadrao, 60);
         }});
 
         // duplo-clique no grafico (reset nativo do Plotly) ignora o range/
         // autorange configurado e recalcula pelo extremo REAL dos dados --
         // isso incluia o piso artificial do preenchimento do dique/sill
-        // (BASE_Z_ABSOLUTA, bem mais fundo que a topografia real), entao o
-        // "reset" jogava o eixo de volta pra algo tipo -600/-700 em vez do
-        // range padrao (-100 a 1150) que a gente define. Intercepta o evento
-        // e forca de volta pro range padrao (X bate com o angulo atual).
-        gd.on('plotly_doubleclick', function() {{
-            Plotly.relayout(gd, {{
-                'xaxis.range': [{X_MIN}, {X_MAX}],
-                'yaxis.range': [{Y_MIN}, {Y_MAX}],
-                'xaxis2.range': [0, ANGULOS[anguloAtual].compKm],
-                'yaxis2.range': [-100, 1150],
-            }});
-        }});
+        // (BASE_Z_ABSOLUTA, bem mais fundo que a topografia real) e rios/
+        // estradas OSM que vao bem alem da area do modelo, entao o "reset"
+        // jogava os eixos pra fora do recorte padrao. Intercepta o evento e
+        // forca de volta (mesma funcao usada apos clique de botao) -- o
+        // proprio reset interno do Plotly aplica o range ruim DEPOIS de
+        // emitir esse evento (confirmado testando), entao um setTimeout(0)
+        // simples nao bastava -- precisa de um delay real (~60ms) pra
+        // garantir que roda por ULTIMO, depois do reset nativo.
+        gd.on('plotly_doubleclick', function() {{ setTimeout(resetarEixosPadrao, 60); }});
 
         // slider arrastado direto (nao via botao/clique) tambem atualiza a
         // espessura -- setTimeout deixa o Plotly terminar de aplicar o novo
