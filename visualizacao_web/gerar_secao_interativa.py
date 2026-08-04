@@ -19,6 +19,7 @@ from pathlib import Path
 
 import geopandas as gpd
 import numpy as np
+import pandas as pd
 import plotly.graph_objects as go
 import rasterio.features
 from affine import Affine
@@ -599,35 +600,33 @@ def main():
             legendrank=0, legendgroup="campo",
         ), row=1, col=2)
 
-    # dados estruturais -- so a categoria "falha_ou_dique_ambiguo_relevo_negativo"
-    # (lineamentos negativos interpretados como possivel falha/dique, ver
-    # PONTOS_ESTRUTURAIS_GPKG). Esses pontos vem de lineamento_negativo (satelite)
-    # e NAO tem dip medido (dip_deg sempre NaN -- lineamento so da azimute, ja
-    # documentado no projeto). Por isso NAO usa o esquema de "pin" com balao
-    # inclinado por mergulho (nao ha mergulho real pra inclinar) -- em vez
-    # disso e um risco vertical fino (preto) cortando a secao inteira, na
-    # posicao onde a linha de corte atual cruza o lineamento.
-    CLASSIFICACAO_ESTRUTURAL_ALVO = "falha_ou_dique_ambiguo_relevo_negativo"
-    idx_estrutural_risco = None
+    # dados estruturais -- duas categorias: "fratura_falha" (dado de campo,
+    # tem dip medido de verdade) e "falha_ou_dique_ambiguo_relevo_negativo"
+    # (lineamento de satelite, so azimute, dip_deg sempre NaN -- ja
+    # documentado no projeto). Como nem toda linha tem mergulho confiavel,
+    # NAO usa o esquema de "pin" com balao inclinado por mergulho -- em vez
+    # disso e um risco vertical fino (preto) cortando a secao inteira, com um
+    # simbolo de falha (X) numa altura fixa, na posicao onde a linha de corte
+    # atual cruza o ponto/lineamento.
+    CLASSIFICACOES_ESTRUTURAL_ALVO = ["falha_ou_dique_ambiguo_relevo_negativo", "fratura_falha"]
     estrutural_dados_secao = []
     if PONTOS_ESTRUTURAIS_GPKG.exists():
         gdf_estrut = gpd.read_file(PONTOS_ESTRUTURAIS_GPKG)
-        gdf_estrut = gdf_estrut[gdf_estrut["classificacao"] == CLASSIFICACAO_ESTRUTURAL_ALVO]
+        gdf_estrut = gdf_estrut[gdf_estrut["classificacao"].isin(CLASSIFICACOES_ESTRUTURAL_ALVO)]
         for row in gdf_estrut.itertuples():
+            dip_txt = f"{row.dip_deg:.0f}°" if pd.notna(row.dip_deg) else "não medido"
             hover = (
                 f"<b>{row.ponto_id}</b><br>"
                 f"Classificação: {row.classificacao}<br>"
                 f"Formação: {row.formacao}<br>"
                 f"Azimute: {row.azimute_ou_strike_deg:.0f}°<br>"
-                f"Fonte: {row.fonte_dado} (sem mergulho medido)"
+                f"Mergulho: {dip_txt}<br>"
+                f"Fonte: {row.fonte_dado}"
             )
             estrutural_dados_secao.append((row.geometry.x, row.geometry.y, hover))
-        idx_estrutural_risco = len(fig.data)
-        fig.add_trace(go.Scatter(
-            x=[], y=[], mode="lines", line=dict(color="black", width=1),
-            name="Falha/Dique (relevo negativo)", showlegend=True, visible=False,
-            hoverinfo="text", legendgroup="estrutural",
-        ), row=1, col=2)
+        # a trace so e adicionada mais abaixo, DEPOIS do loop de ORDEM_TRACES --
+        # senao (ordem de insercao 2D = ordem de desenho) o risco ficava
+        # ESCONDIDO atras das camadas/terreno, que sao desenhados depois dela.
 
     idx_trace_terreno = None
     for chave in ORDEM_TRACES:
@@ -642,6 +641,28 @@ def main():
                 x=x, y=y, mode="lines", line=dict(width=0), fill="toself",
                 fillcolor=CORES_TRACES[chave], name=NOMES_TRACES[chave], legendrank=LEGENDRANK_TRACES[chave],
             ), row=1, col=2)
+
+    # risco estrutural (fratura/falha + falha-ou-dique de relevo negativo) --
+    # so agora, DEPOIS do loop de ORDEM_TRACES (terreno/camadas/quaternario/
+    # sill/dique), pra desenhar por CIMA deles (ordem de insercao = ordem de
+    # desenho em 2D) -- antes ficava escondido atras das camadas. Duas
+    # traces: o risco vertical fino em si, e um simbolo de falha (X --
+    # duas barras cruzadas, convencao geologica padrao de simbolo de falha
+    # em secao) desenhado numa altura fixa junto a cada linha.
+    idx_estrutural_risco = None
+    idx_estrutural_simbolo = None
+    if estrutural_dados_secao:
+        idx_estrutural_risco = len(fig.data)
+        fig.add_trace(go.Scatter(
+            x=[], y=[], mode="lines", line=dict(color="black", width=1),
+            name="Falha/Fratura", showlegend=True, visible=False,
+            hoverinfo="text", legendgroup="estrutural",
+        ), row=1, col=2)
+        idx_estrutural_simbolo = len(fig.data)
+        fig.add_trace(go.Scatter(
+            x=[], y=[], mode="lines", line=dict(color="black", width=3),
+            showlegend=False, visible=False, hoverinfo="none", legendgroup="estrutural",
+        ), row=1, col=2)
 
     # escala grafica + seta norte no mapa em planta -- elementos cartograficos
     # padrao, adicionados por ULTIMO (depois de todas as traces usadas nos
@@ -704,9 +725,10 @@ def main():
 
     # heatmap + poligonos de geologia (+ quaternario) + camadas OSM + pontos de campo (se existir) --
     # nenhuma dessas traces muda entre frames, entao os frames de corte comecam logo depois delas.
-    if idx_estrutural_risco is not None:
-        n_traces_fixas = idx_estrutural_risco + 1
-    elif idx_pontos_campo is not None:
+    # NOTA: o risco estrutural NAO entra aqui -- suas traces sao adicionadas
+    # DEPOIS do loop de ORDEM_TRACES (de proposito, pra desenhar por cima),
+    # entao ficam fora do intervalo animado por frame, nao antes dele.
+    if idx_pontos_campo is not None:
         n_traces_fixas = idx_campo_pin_marcador + 1
     else:
         n_traces_fixas = idx_osm_fim + 1
@@ -755,11 +777,11 @@ def main():
         height=840,
         legend=dict(x=1.01, y=0.94, bgcolor="rgba(45,10,74,0.75)", bordercolor=MARCA_ROXO, borderwidth=1,
                     font=dict(color=MARCA_CINZA_CLARO)),
-        margin=dict(l=50, r=180, t=70, b=200),
+        margin=dict(l=50, r=180, t=70, b=220),
         updatemenus=[
             dict(
                 type="buttons", direction="left", showactive=False,
-                x=0.5, y=-0.42, xanchor="center", yanchor="top",
+                x=0.5, y=-0.38, xanchor="center", yanchor="top",
                 bgcolor=MARCA_ROXO_ESCURO, bordercolor=MARCA_ROXO, borderwidth=1.5,
                 font=dict(color=MARCA_CINZA_CLARO, family=MARCA_FONTE),
                 buttons=[dict(label=nome, method="skip") for nome, _ in ANGULOS] + [
@@ -769,6 +791,14 @@ def main():
                          args=[{"visible": [False] + [True] * n_geo_mapa}, [0] + list(range(idx_geo_mapa_inicio, idx_geo_mapa_fim + 1))]),
                     dict(label="Tema: Escuro", method="skip"),
                     dict(label="Tema: Claro", method="skip"),
+                ],
+            ),
+            dict(
+                type="buttons", direction="left", showactive=False,
+                x=0.5, y=-0.46, xanchor="center", yanchor="top",
+                bgcolor=MARCA_ROXO_ESCURO, bordercolor=MARCA_ROXO, borderwidth=1.5,
+                font=dict(color=MARCA_CINZA_CLARO, family=MARCA_FONTE),
+                buttons=[
                     dict(label="OSM: ON", method="restyle",
                          args=[{"visible": True}, list(range(idx_osm_inicio, idx_osm_fim + 1))]),
                     dict(label="OSM: OFF", method="restyle",
@@ -779,8 +809,10 @@ def main():
                     dict(label="Campo: OFF", method="restyle",
                          args=[{"visible": False}, [idx_pontos_campo, idx_campo_pin_linha, idx_campo_pin_marcador]]),
                 ] if idx_pontos_campo is not None else []) + ([
-                    dict(label="Estrutura: ON", method="restyle", args=[{"visible": True}, [idx_estrutural_risco]]),
-                    dict(label="Estrutura: OFF", method="restyle", args=[{"visible": False}, [idx_estrutural_risco]]),
+                    dict(label="Estrutura: ON", method="restyle",
+                         args=[{"visible": True}, [idx_estrutural_risco, idx_estrutural_simbolo]]),
+                    dict(label="Estrutura: OFF", method="restyle",
+                         args=[{"visible": False}, [idx_estrutural_risco, idx_estrutural_simbolo]]),
                 ] if idx_estrutural_risco is not None else []),
             ),
         ],
@@ -890,8 +922,10 @@ def main():
         var IDX_CAMPO_PIN_LINHA = {idx_campo_pin_linha};
         var IDX_CAMPO_PIN_MARCADOR = {idx_campo_pin_marcador};
         var IDX_ESTRUTURAL_RISCO = {idx_estrutural_risco};
+        var IDX_ESTRUTURAL_SIMBOLO = {idx_estrutural_simbolo};
         var LIMIAR_ESTRUTURAL_M = 400;  // mesmo limiar apertado dos pontos de campo
-        var Y_MIN_SECAO = -600, Y_MAX_SECAO = 1150;  // span vertical do risco -- bate com o range do eixo
+        var Y_MIN_SECAO = -600;  // fundo fixo do risco -- o topo agora segue a topografia real
+        var TAMANHO_SIMBOLO_X_KM = 0.15;  // meia-largura do X em km no eixo horizontal da secao
         var IDX_ANOTACAO_DIR0 = {idx_anotacao_dir0};
         var IDX_ANOTACAO_DIR1 = {idx_anotacao_dir1};
         var IDX_ANOTACOES_SUBTITULO = [0, 1, 2];
@@ -922,6 +956,7 @@ def main():
                 'legend.bgcolor': t.legendBg, 'legend.font.color': t.texto,
                 'title.font.color': t.texto,
                 'updatemenus[0].bgcolor': t.botaoBg, 'updatemenus[0].font.color': t.texto,
+                'updatemenus[1].bgcolor': t.botaoBg, 'updatemenus[1].font.color': t.texto,
                 'sliders[0].bgcolor': t.botaoBg, 'sliders[0].font.color': t.texto,
                 'sliders[0].currentvalue.font.color': t.texto,
                 'xaxis2.color': t.texto, 'xaxis2.gridcolor': t.grid, 'xaxis2.zerolinecolor': t.zerogrid,
@@ -1074,15 +1109,17 @@ def main():
                 todos.filter(function(pt) {{ return pt.tipo === 'campo'; }}), '{COR_LITOLOGIA_PADRAO}', 'diamond', 9);
         }}
 
-        // risco vertical fino cortando a secao inteira -- projeta cada lineamento
-        // na linha de corte ATUAL igual as localidades (mesma decomposicao
-        // ortonormal), mas SEM elevacao/altura de pin: e so uma linha reta de
-        // Y_MIN_SECAO a Y_MAX_SECAO na posicao x onde a linha de corte passa
-        // perto do lineamento. Sem inclinacao por mergulho de proposito -- esses
-        // pontos vem de lineamento de satelite, so tem azimute, nunca dip medido.
+        // risco vertical fino cortando a secao -- projeta cada lineamento/
+        // ponto estrutural na linha de corte ATUAL igual as localidades
+        // (mesma decomposicao ortonormal), mas SEM elevacao/altura de pin:
+        // e uma linha reta que vai do fundo da secao (Y_MIN_SECAO) ATE a
+        // topografia real naquele x (interpolarElevacao) -- nao ultrapassa
+        // o relevo, so risca por baixo dele. Sem inclinacao por mergulho de
+        // proposito pros pontos sem dip medido (lineamento de satelite).
         function atualizarEstrutural(a, offsetT) {{
             var info = ANGULOS[a];
             var xs = [], ys = [], hovers = [];
+            var xsSimbolo = [], ysSimbolo = [];
             ESTRUTURAL_SECAO.forEach(function(pt) {{
                 var vx = pt.x - CX, vy = pt.y - CY;
                 var s = vx * info.dx + vy * info.dy;
@@ -1090,12 +1127,22 @@ def main():
                 var perp = tLoc - offsetT;
                 if (Math.abs(perp) <= LIMIAR_ESTRUTURAL_M) {{
                     var xKm = (s - info.s0) / 1000;
+                    var yTopo = interpolarElevacao(xKm);
                     if (xs.length > 0) {{ xs.push(NaN); ys.push(NaN); hovers.push(''); }}
-                    xs.push(xKm, xKm); ys.push(Y_MIN_SECAO, Y_MAX_SECAO);
+                    xs.push(xKm, xKm); ys.push(Y_MIN_SECAO, yTopo);
                     hovers.push(pt.hover, pt.hover);
+                    // simbolo de falha (X) logo abaixo da topografia, junto a linha
+                    if (xsSimbolo.length > 0) {{ xsSimbolo.push(NaN); ysSimbolo.push(NaN); }}
+                    var yBase = yTopo - 60, yFundoSimbolo = yTopo - 300;
+                    xsSimbolo.push(xKm - TAMANHO_SIMBOLO_X_KM, xKm + TAMANHO_SIMBOLO_X_KM, NaN,
+                                   xKm - TAMANHO_SIMBOLO_X_KM, xKm + TAMANHO_SIMBOLO_X_KM);
+                    ysSimbolo.push(yFundoSimbolo, yBase, NaN, yBase, yFundoSimbolo);
                 }}
             }});
             Plotly.restyle(gd, {{x: [xs], y: [ys], hovertext: [hovers]}}, [IDX_ESTRUTURAL_RISCO]);
+            if (IDX_ESTRUTURAL_SIMBOLO !== null) {{
+                Plotly.restyle(gd, {{x: [xsSimbolo], y: [ysSimbolo]}}, [IDX_ESTRUTURAL_SIMBOLO]);
+            }}
         }}
 
         function atualizarEspessuras(a, p) {{
