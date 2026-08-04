@@ -660,7 +660,7 @@ def main():
         ), row=1, col=2)
         idx_estrutural_simbolo = len(fig.data)
         fig.add_trace(go.Scatter(
-            x=[], y=[], mode="lines", line=dict(color="black", width=1.6),
+            x=[], y=[], mode="lines", line=dict(color="black", width=1.2),
             showlegend=False, visible=False, hoverinfo="none", legendgroup="estrutural",
         ), row=1, col=2)
 
