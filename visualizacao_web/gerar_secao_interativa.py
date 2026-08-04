@@ -762,7 +762,7 @@ def main():
     fig.update_yaxes(showticklabels=False, row=1, col=1, range=[Y_MIN, Y_MAX], constrain="domain")
     comprimento0_km = (angulos_info[0]["s_vals"][-1] - angulos_info[0]["s_vals"][0]) / 1000
     fig.update_xaxes(title_text="Distância ao longo da seção (km)", row=1, col=2, range=[0, comprimento0_km], **eixo_escuro)
-    fig.update_yaxes(title_text="Elevação (m)", row=1, col=2, range=[-600, 1150], **eixo_escuro)
+    fig.update_yaxes(title_text="Elevação (m)", row=1, col=2, range=[-100, 1150], **eixo_escuro)
     fig.update_xaxes(row=2, col=1, **eixo_escuro)
     fig.update_yaxes(title_text="Espessura (m)", row=2, col=1, range=[0, 400], **eixo_escuro)
 
@@ -924,7 +924,7 @@ def main():
         var IDX_ESTRUTURAL_RISCO = {idx_estrutural_risco};
         var IDX_ESTRUTURAL_SIMBOLO = {idx_estrutural_simbolo};
         var LIMIAR_ESTRUTURAL_M = 400;  // mesmo limiar apertado dos pontos de campo
-        var Y_MIN_SECAO = -600;  // fundo fixo do risco -- o topo agora segue a topografia real
+        var Y_MIN_SECAO = -100;  // fundo fixo do risco -- bate com o novo limite inferior do eixo (topo segue a topografia real)
         var GAP_SIMBOLO_KM = 0.04;  // buffer/gap entre cada meia-seta e o risco vertical
         var ALTURA_SIMBOLO_M = 220;  // variacao vertical (altura) de cada meia-seta, em metros -- maior pra ficar visivel na escala cheia (0-22km)
         var OFFSET_SIMBOLO_M = 170;  // deslocamento vertical entre as duas metades (efeito "fatiado")
