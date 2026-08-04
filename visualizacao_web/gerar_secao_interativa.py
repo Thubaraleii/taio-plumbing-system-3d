@@ -758,11 +758,11 @@ def main():
 
     COR_PAINEL = "#3A3A46"  # fundo cinza dos graficos (secao + barras), diferente do navy da pagina -- mais facil de ler
     eixo_escuro = dict(gridcolor="#54545f", zerolinecolor="#6a6a75", color=MARCA_CINZA_CLARO)
-    fig.update_xaxes(showticklabels=False, row=1, col=1, range=[X_MIN, X_MAX], scaleanchor="y1", scaleratio=1, constrain="domain")
-    fig.update_yaxes(showticklabels=False, row=1, col=1, range=[Y_MIN, Y_MAX], constrain="domain")
+    fig.update_xaxes(showticklabels=False, row=1, col=1, range=[X_MIN, X_MAX], autorange=False, scaleanchor="y1", scaleratio=1, constrain="domain")
+    fig.update_yaxes(showticklabels=False, row=1, col=1, range=[Y_MIN, Y_MAX], autorange=False, constrain="domain")
     comprimento0_km = (angulos_info[0]["s_vals"][-1] - angulos_info[0]["s_vals"][0]) / 1000
-    fig.update_xaxes(title_text="Distância ao longo da seção (km)", row=1, col=2, range=[0, comprimento0_km], **eixo_escuro)
-    fig.update_yaxes(title_text="Elevação (m)", row=1, col=2, range=[-100, 1150], **eixo_escuro)
+    fig.update_xaxes(title_text="Distância ao longo da seção (km)", row=1, col=2, range=[0, comprimento0_km], autorange=False, **eixo_escuro)
+    fig.update_yaxes(title_text="Elevação (m)", row=1, col=2, range=[-100, 1150], autorange=False, **eixo_escuro)
     fig.update_xaxes(row=2, col=1, **eixo_escuro)
     fig.update_yaxes(title_text="Espessura (m)", row=2, col=1, range=[0, 400], **eixo_escuro)
 
@@ -978,8 +978,9 @@ def main():
             // rotulos dos pins (nome da localidade/rio/estrada na secao) tambem
             // tem cor propria fixa na criacao -- sem isso ficavam ilegiveis no
             // tema claro (texto claro sobre fundo claro).
-            Plotly.restyle(gd, {{'textfont.color': t.texto}},
-                [IDX_PIN_LUGARES_MARCADOR, IDX_PIN_RIOS_MARCADOR, IDX_PIN_ESTRADAS_MARCADOR]);
+            var idxTextoPins = [IDX_PIN_LUGARES_MARCADOR, IDX_PIN_RIOS_MARCADOR, IDX_PIN_ESTRADAS_MARCADOR];
+            if (IDX_CAMPO_PIN_MARCADOR !== null) {{ idxTextoPins.push(IDX_CAMPO_PIN_MARCADOR); }}
+            Plotly.restyle(gd, {{'textfont.color': t.texto}}, idxTextoPins);
             document.body.style.background = t.paper;
         }}
 
@@ -1242,6 +1243,20 @@ def main():
             }}
             // botoes "Mapa: Hipsometria/Geologia" (ANGULOS.length, +1) usam
             // method='restyle' proprio, nao precisam de JS aqui.
+        }});
+
+        // duplo-clique no grafico (reset nativo do Plotly) ignora o range/
+        // autorange configurado e recalcula pelo extremo REAL dos dados --
+        // isso incluia o piso artificial do preenchimento do dique/sill
+        // (BASE_Z_ABSOLUTA, bem mais fundo que a topografia real), entao o
+        // "reset" jogava o eixo de volta pra algo tipo -600/-700 em vez do
+        // range padrao (-100 a 1150) que a gente define. Intercepta o evento
+        // e forca de volta pro range padrao (X bate com o angulo atual).
+        gd.on('plotly_doubleclick', function() {{
+            Plotly.relayout(gd, {{
+                'xaxis2.range': [0, ANGULOS[anguloAtual].compKm],
+                'yaxis2.range': [-100, 1150],
+            }});
         }});
 
         // slider arrastado direto (nao via botao/clique) tambem atualiza a
