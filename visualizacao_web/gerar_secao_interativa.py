@@ -38,6 +38,9 @@ OSM_LUGARES_GEOJSON = BASE.parent / "2_Banco_de_Dados" / "saida_processada" / "o
 PONTOS_CAMPO_GPKG = (
     BASE.parent / "2_Banco_de_Dados" / "Unificação" / "GPKG_Novos" / "pontos_unificados_completo.gpkg"
 )
+PONTOS_ESTRUTURAIS_GPKG = (
+    BASE.parent / "2_Banco_de_Dados" / "Unificação" / "GPKG_Novos" / "nuvem_pontos_direcoes.gpkg"
+)
 LOGO_PATH = Path(__file__).parent / "assets" / "logo_gstech.jpg"
 OUT_HTML = Path(__file__).parent / "secao_interativa.html"
 
@@ -104,6 +107,19 @@ CORES_LITOLOGIA_CAMPO = {
     "encaixante_rio_bonito": CORES_CAMADAS[4],
 }
 COR_LITOLOGIA_PADRAO = "#999999"
+# dados estruturais (fraturas/falhas/diques inferidos/acamamento etc., ver
+# PONTOS_ESTRUTURAIS_GPKG) -- cor por classificacao, cobre todas as categorias
+# do catalogo (nao so fratura_falha, que foi so o pedido inicial do usuario).
+CORES_CLASSIFICACAO_ESTRUTURAL = {
+    "acamamento_sedimentar": "#C9A66B",
+    "fratura_falha": "#D64545",
+    "dique_provavel_relevo_positivo": "#2E7D5B",
+    "dique_confirmado_mapa": COR_DIQUE,
+    "falha_ou_dique_ambiguo_relevo_negativo": "#E8A33D",
+    "contato_sill_encaixante": "#A63D2F",
+    "fabrica_interna_intrusao": "#7B2FFF",
+}
+COR_CLASSIFICACAO_PADRAO = "#999999"
 ESPESSURA_SILL = 400.0
 QUATERNARIO_LIMIAR = 450.0
 QUATERNARIO_ESPESSURA = 30.0
@@ -583,6 +599,36 @@ def main():
             legendrank=0, legendgroup="campo",
         ), row=1, col=2)
 
+    # dados estruturais -- so a categoria "falha_ou_dique_ambiguo_relevo_negativo"
+    # (lineamentos negativos interpretados como possivel falha/dique, ver
+    # PONTOS_ESTRUTURAIS_GPKG). Esses pontos vem de lineamento_negativo (satelite)
+    # e NAO tem dip medido (dip_deg sempre NaN -- lineamento so da azimute, ja
+    # documentado no projeto). Por isso NAO usa o esquema de "pin" com balao
+    # inclinado por mergulho (nao ha mergulho real pra inclinar) -- em vez
+    # disso e um risco vertical fino (preto) cortando a secao inteira, na
+    # posicao onde a linha de corte atual cruza o lineamento.
+    CLASSIFICACAO_ESTRUTURAL_ALVO = "falha_ou_dique_ambiguo_relevo_negativo"
+    idx_estrutural_risco = None
+    estrutural_dados_secao = []
+    if PONTOS_ESTRUTURAIS_GPKG.exists():
+        gdf_estrut = gpd.read_file(PONTOS_ESTRUTURAIS_GPKG)
+        gdf_estrut = gdf_estrut[gdf_estrut["classificacao"] == CLASSIFICACAO_ESTRUTURAL_ALVO]
+        for row in gdf_estrut.itertuples():
+            hover = (
+                f"<b>{row.ponto_id}</b><br>"
+                f"Classificação: {row.classificacao}<br>"
+                f"Formação: {row.formacao}<br>"
+                f"Azimute: {row.azimute_ou_strike_deg:.0f}°<br>"
+                f"Fonte: {row.fonte_dado} (sem mergulho medido)"
+            )
+            estrutural_dados_secao.append((row.geometry.x, row.geometry.y, hover))
+        idx_estrutural_risco = len(fig.data)
+        fig.add_trace(go.Scatter(
+            x=[], y=[], mode="lines", line=dict(color="black", width=1),
+            name="Falha/Dique (relevo negativo)", showlegend=True, visible=False,
+            hoverinfo="text", legendgroup="estrutural",
+        ), row=1, col=2)
+
     idx_trace_terreno = None
     for chave in ORDEM_TRACES:
         x, y = inicial[chave]
@@ -658,7 +704,12 @@ def main():
 
     # heatmap + poligonos de geologia (+ quaternario) + camadas OSM + pontos de campo (se existir) --
     # nenhuma dessas traces muda entre frames, entao os frames de corte comecam logo depois delas.
-    n_traces_fixas = (idx_campo_pin_marcador + 1) if idx_pontos_campo is not None else (idx_osm_fim + 1)
+    if idx_estrutural_risco is not None:
+        n_traces_fixas = idx_estrutural_risco + 1
+    elif idx_pontos_campo is not None:
+        n_traces_fixas = idx_campo_pin_marcador + 1
+    else:
+        n_traces_fixas = idx_osm_fim + 1
     frames = []
     for a, secoes_angulo in enumerate(todas_secoes):
         for p, secao in enumerate(secoes_angulo):
@@ -727,7 +778,10 @@ def main():
                          args=[{"visible": True}, [idx_pontos_campo, idx_campo_pin_linha, idx_campo_pin_marcador]]),
                     dict(label="Campo: OFF", method="restyle",
                          args=[{"visible": False}, [idx_pontos_campo, idx_campo_pin_linha, idx_campo_pin_marcador]]),
-                ] if idx_pontos_campo is not None else []),
+                ] if idx_pontos_campo is not None else []) + ([
+                    dict(label="Estrutura: ON", method="restyle", args=[{"visible": True}, [idx_estrutural_risco]]),
+                    dict(label="Estrutura: OFF", method="restyle", args=[{"visible": False}, [idx_estrutural_risco]]),
+                ] if idx_estrutural_risco is not None else []),
             ),
         ],
         sliders=[dict(
@@ -767,6 +821,9 @@ def main():
     campo_js = ",".join(
         "{nome:%r, x:%.1f, y:%.1f, cor:%r, hover:%r}" % (str(nome), x, y, cor, hover)
         for nome, x, y, cor, hover in campo_dados_secao
+    )
+    estrutural_js = ",".join(
+        "{x:%.1f, y:%.1f, hover:%r}" % (x, y, hover) for x, y, hover in estrutural_dados_secao
     )
 
     def cruzamentos_js(todas_pins):
@@ -812,6 +869,7 @@ def main():
         var NOMES_CAMADAS = [{nomes_camadas_js}];
         var LOCALIDADES = [{localidades_js}];
         var PONTOS_CAMPO_SECAO = [{campo_js}];
+        var ESTRUTURAL_SECAO = [{estrutural_js}];
         var PINS_RIOS = [
         {pins_rios_js}
         ];
@@ -831,6 +889,9 @@ def main():
         var IDX_PIN_ESTRADAS_MARCADOR = {idx_pin_traces["estradas_marcador"]};
         var IDX_CAMPO_PIN_LINHA = {idx_campo_pin_linha};
         var IDX_CAMPO_PIN_MARCADOR = {idx_campo_pin_marcador};
+        var IDX_ESTRUTURAL_RISCO = {idx_estrutural_risco};
+        var LIMIAR_ESTRUTURAL_M = 400;  // mesmo limiar apertado dos pontos de campo
+        var Y_MIN_SECAO = -600, Y_MAX_SECAO = 1150;  // span vertical do risco -- bate com o range do eixo
         var IDX_ANOTACAO_DIR0 = {idx_anotacao_dir0};
         var IDX_ANOTACAO_DIR1 = {idx_anotacao_dir1};
         var IDX_ANOTACOES_SUBTITULO = [0, 1, 2];
@@ -1013,11 +1074,36 @@ def main():
                 todos.filter(function(pt) {{ return pt.tipo === 'campo'; }}), '{COR_LITOLOGIA_PADRAO}', 'diamond', 9);
         }}
 
+        // risco vertical fino cortando a secao inteira -- projeta cada lineamento
+        // na linha de corte ATUAL igual as localidades (mesma decomposicao
+        // ortonormal), mas SEM elevacao/altura de pin: e so uma linha reta de
+        // Y_MIN_SECAO a Y_MAX_SECAO na posicao x onde a linha de corte passa
+        // perto do lineamento. Sem inclinacao por mergulho de proposito -- esses
+        // pontos vem de lineamento de satelite, so tem azimute, nunca dip medido.
+        function atualizarEstrutural(a, offsetT) {{
+            var info = ANGULOS[a];
+            var xs = [], ys = [], hovers = [];
+            ESTRUTURAL_SECAO.forEach(function(pt) {{
+                var vx = pt.x - CX, vy = pt.y - CY;
+                var s = vx * info.dx + vy * info.dy;
+                var tLoc = vx * info.px + vy * info.py;
+                var perp = tLoc - offsetT;
+                if (Math.abs(perp) <= LIMIAR_ESTRUTURAL_M) {{
+                    var xKm = (s - info.s0) / 1000;
+                    if (xs.length > 0) {{ xs.push(NaN); ys.push(NaN); hovers.push(''); }}
+                    xs.push(xKm, xKm); ys.push(Y_MIN_SECAO, Y_MAX_SECAO);
+                    hovers.push(pt.hover, pt.hover);
+                }}
+            }});
+            Plotly.restyle(gd, {{x: [xs], y: [ys], hovertext: [hovers]}}, [IDX_ESTRUTURAL_RISCO]);
+        }}
+
         function atualizarEspessuras(a, p) {{
             var vals = ESPESSURAS[a][p];
             var rotulos = vals.map(function(v) {{ return Math.round(v) + 'm'; }});
             Plotly.restyle(gd, {{y: [vals], text: [rotulos]}}, [IDX_TRACE_BARRA]);
             atualizarPins(a, p);
+            atualizarEstrutural(a, ANGULOS[a].t[p]);
         }}
 
         // forca o estado inicial (posicao central) -- o slider as vezes
