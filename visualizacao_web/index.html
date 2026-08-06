@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Taió Plumbing System — Modelos 3D/2D</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; min-height: 100vh; display: flex; flex-direction: column; align-items: center;
+    justify-content: center; background: #1B1F2E; color: #F2F2F2;
+    font-family: Montserrat, Arial, sans-serif; padding: 40px 20px;
+  }
+  img.logo {
+    width: 96px; height: 96px; border-radius: 50%; border: 3px solid #7B2FFF;
+    box-shadow: 0 0 20px rgba(123,47,255,0.6); margin-bottom: 20px;
+  }
+  h1 { font-size: 26px; margin: 0 0 6px 0; text-align: center; }
+  h1 b { color: #7B2FFF; }
+  p.sub { opacity: 0.7; margin: 0 0 36px 0; text-align: center; max-width: 560px; }
+  .cards { display: flex; gap: 20px; flex-wrap: wrap; justify-content: center; max-width: 900px; }
+  a.card {
+    display: block; width: 320px; background: #262B3D; border: 1px solid #7B2FFF; border-radius: 10px;
+    padding: 22px; text-decoration: none; color: #F2F2F2; transition: transform 0.15s, box-shadow 0.15s;
+  }
+  a.card:hover { transform: translateY(-3px); box-shadow: 0 6px 20px rgba(123,47,255,0.35); }
+  a.card h2 { font-size: 17px; margin: 0 0 8px 0; color: #7B2FFF; }
+  a.card p { font-size: 13px; opacity: 0.8; margin: 0; line-height: 1.5; }
+  footer { margin-top: 40px; font-size: 11px; opacity: 0.5; }
+</style>
+</head>
+<body>
+  <img class="logo" src="assets/logo_gstech.jpg" alt="GS Tech">
+  <h1><b>Taió Plumbing System</b></h1>
+  <p class="sub">Modelagem 3D e seção transversal interativa do sistema intrusivo (sill/dique) de Taió — Mestrado em Geologia, UFSC.</p>
+  <div class="cards">
+    <a class="card" href="viewer_3d_taio.html">
+      <h2>Modelo 3D interativo</h2>
+      <p>Cubão 3D com topografia real, corpos intrusivos, formações sedimentares e ferramenta de corte com 4 direções. Modos de cor: hipsometria, geologia real (CPRM) e satélite.</p>
+    </a>
+    <a class="card" href="secao_interativa.html">
+      <h2>Seção transversal interativa</h2>
+      <p>Mapa em planta + seção transversal sincronizados, com linha de corte rotacionável, pontos de campo, dados estruturais e camadas de referência (rios/estradas/localidades).</p>
+    </a>
+  </div>
+  <footer>Criado por Afonso Henrique de Jesus</footer>
+</body>
+</html>
