@@ -4,9 +4,10 @@ Gera uma segunda versao dos solidos de sill/dique, so pra composicao do
 -- NAO tem apego cientifico, diferente de 05_gerar_solidos_visualizacao.py
 (que usa espessura real medida em campo).
 
-- sill_diabasio: espessura fixa e exagerada (ESPESSURA_SILL_ESTILIZADA),
-  bem maior que a real (~27m), pra dar a sensacao de "profundidade" no
-  cubo sem tentar ser preciso.
+- sill_diabasio: base = topo real da formacao Serra Alta (mesmo plano de
+  mergulho regional + erosao usado nos visualizadores cientificos), com
+  piso minimo de ESPESSURA_MINIMA_SILL (~27m, mediana de campo) onde a
+  Serra Alta fica rasa demais perto de onde o sill aflora.
 - dique: em vez de espessura fixa, o fundo vai ate BASE_Z_ABSOLUTA (a
   mesma cota usada como piso do cubao nos scripts de visualizacao) --
   fica "inteirico" atravessando o bloco todo, representando o conduto
@@ -52,11 +53,29 @@ LIMITES_CAMADAS = [0.0, 250.0, 500.0, 750.0, 1000.0]  # base -> topo, 4 faixas, 
 
 # sill de volta a posicao real (drapeado na topografia, nao mais achatado
 # numa cota fixa -- a versao "concordante plana" desceu demais e ficou
-# artificial). Espessura ainda exagerada (bem mais que os ~27m reais) so
-# pra dar volume visivel.
-ESPESSURA_SILL_ESTILIZADA = 400.0
+# artificial).
+ESPESSURA_SILL_ESTILIZADA = 400.0  # OBSOLETO (10/08/2026) -- ver elevacao_serra_alta/
+# ESPESSURA_MINIMA_SILL abaixo; a base do sill deixou de ser um offset fixo.
 
 PASSO_DENSIFICACAO = 40.0
+
+# base REAL do sill = topo da formacao Serra Alta, nao mais um offset fixo
+# exagerado -- mesmo plano de mergulho regional + erosao contra a topografia
+# ja usado nos visualizadores cientificos (ver TREND_A/TREND_B/Z_REF_TILT em
+# visualizacao_web/gerar_visualizador_3d.py e gerar_secao_interativa.py;
+# as 4 faixas de encaixante deste script (LIMITES_CAMADAS) continuam
+# simplificadas/planas, sem relacao com isso -- so o sill fica mais fiel).
+TREND_A, TREND_B = 0.01034, -0.00025
+TREND_X0, TREND_Y0 = 592300.0, 7015058.8
+Z_REF_TILT = 1053.5
+PROFUNDIDADE_SERRA_ALTA = 350.0
+ESPESSURA_MINIMA_SILL = 27.0  # mediana real medida em campo -- piso pra nao afinar
+# demais/inverter onde a Serra Alta fica rasa perto de onde o sill aflora.
+
+
+def elevacao_serra_alta(x, y, drapear):
+    plano = Z_REF_TILT + TREND_A * (x - TREND_X0) + TREND_B * (y - TREND_Y0) - PROFUNDIDADE_SERRA_ALTA
+    return min(plano, drapear(x, y))
 
 
 def montar_interpolador_topografia():
@@ -93,11 +112,16 @@ def triangular_interior(poligono, passo: float):
     return pontos, np.array(triangulos)
 
 
-def construir_solido(poligono, drapear, espessura=None, base_z_absoluto=None, topo_fixo=None):
+def construir_solido(poligono, drapear, espessura=None, base_z_absoluto=None, topo_fixo=None,
+                      base_fn=None, espessura_minima=None):
     """Base: `espessura` (topo - espessura) OU `base_z_absoluto` (cota fixa
-    pra todo mundo). Topo: drapeado na topografia real, OU `topo_fixo`
-    (plano/concordante, pra sill "passando" entre camadas planas)."""
-    assert (espessura is None) != (base_z_absoluto is None), "passe espessura OU base_z_absoluto, nao os dois"
+    pra todo mundo) OU `base_fn(x,y)` (base geologica, ver elevacao_serra_alta
+    -- usa o minimo entre base_fn e topo-espessura_minima, pra nao afinar
+    demais/inverter onde a base geologica fica rasa). Topo: drapeado na
+    topografia real, OU `topo_fixo` (plano/concordante, pra sill "passando"
+    entre camadas planas)."""
+    assert sum(x is not None for x in (espessura, base_z_absoluto, base_fn)) == 1, \
+        "passe exatamente um de: espessura, base_z_absoluto, base_fn"
 
     pontos_xy, triangulos_topo = triangular_interior(poligono, PASSO_DENSIFICACAO)
     n = len(pontos_xy)
@@ -106,7 +130,15 @@ def construir_solido(poligono, drapear, espessura=None, base_z_absoluto=None, to
         z_topo = np.full(n, topo_fixo)
     else:
         z_topo = np.array([drapear(x, y) for x, y in pontos_xy])
-    z_base = z_topo - espessura if espessura is not None else np.full(n, base_z_absoluto)
+
+    if base_fn is not None:
+        z_geologica = np.array([base_fn(x, y) for x, y in pontos_xy])
+        piso_minimo = z_topo - (espessura_minima or 0.0)
+        z_base = np.minimum(z_geologica, piso_minimo)
+    elif espessura is not None:
+        z_base = z_topo - espessura
+    else:
+        z_base = np.full(n, base_z_absoluto)
 
     vertices_topo = np.column_stack([pontos_xy, z_topo])
     vertices_base = np.column_stack([pontos_xy, z_base])
@@ -162,8 +194,9 @@ def main():
     drapear = montar_interpolador_topografia()
     EXPORTS_DIR.mkdir(parents=True, exist_ok=True)
 
-    print(f"sill_diabasio: posicao real (drapeado na topografia), espessura {ESPESSURA_SILL_ESTILIZADA}m")
-    gerar("Soleira", "sill_diabasio_estilizado", drapear, gdf, espessura=ESPESSURA_SILL_ESTILIZADA)
+    print("sill_diabasio: posicao real (drapeado na topografia), base = topo da Serra Alta")
+    gerar("Soleira", "sill_diabasio_estilizado", drapear, gdf,
+          base_fn=lambda x, y: elevacao_serra_alta(x, y, drapear), espessura_minima=ESPESSURA_MINIMA_SILL)
 
     print(f"dique: inteirico ate a cota {BASE_Z_ABSOLUTA}m (piso do cubao)")
     gerar("Dique", "dique_estilizado", drapear, gdf, base_z_absoluto=BASE_Z_ABSOLUTA)

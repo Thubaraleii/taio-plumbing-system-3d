@@ -73,7 +73,13 @@ RESOLUCAO_GRID_TOPO = 63  # pontos por eixo, so para o render (nao afeta o GemPy
 EXAGERO_Z = 6.0  # fator de exagero vertical (relevo real e sutil frente a area horizontal)
 BASE_Z_ABSOLUTA = -600.0  # piso do "cubao" -- mesma cota usada em ../scripts/06_gerar_solidos_estilizados_cubao.py
 COR_SILL, COR_DIQUE = "#A63D2F", "#1B4332"  # paleta exata (dique = verde escuro)
-ESPESSURA_SILL_ESTILIZADA = 400.0  # mesma de ../scripts/06_gerar_solidos_estilizados_cubao.py
+ESPESSURA_SILL_ESTILIZADA = 400.0  # OBSOLETO (10/08/2026) -- o sill deixou de usar espessura fixa,
+# ver ESPESSURA_MINIMA_SILL/elevacao_serra_alta. Mantido só de referência histórica.
+ESPESSURA_MINIMA_SILL = 27.0  # espessura minima do sill (m) -- mediana real medida em campo (ver
+# CLAUDE.md/05_gerar_solidos_visualizacao.py). So entra em jogo onde a superficie da Serra Alta
+# (base "real" do sill, ver elevacao_serra_alta) fica mais rasa que isso -- evita solido
+# degenerado (quase zero ou invertido) perto de onde o sill aflora/a Serra Alta ja teria sido
+# erodida junto.
 PASSO_DENSIFICACAO = 40.0  # mesma de ../scripts/06_gerar_solidos_estilizados_cubao.py -- so
 # pro CORPO SOLIDO do sill/dique (construir_solido), mantido fino de proposito: e o dado
 # cientifico mais importante sempre visivel. NAO usar pro decalque (ver PASSO_DENSIFICACAO_DECAL).
@@ -134,6 +140,18 @@ COR_LITOLOGIA_PADRAO = "#999999"  # encaixante_sedimentar generico / indefinido 
 TREND_A, TREND_B = 0.01034, -0.00025
 TREND_X0, TREND_Y0 = 592300.0, 7015058.8
 Z_REF_TILT = 1053.5  # ancora o plano em boundary(prof=350) = 703.5 (media real do contato)
+
+
+def elevacao_serra_alta(x, y, elevacao_fn):
+    """Cota (Z) do topo da formacao Serra Alta num ponto (x,y) -- mesmo plano
+    de mergulho regional + erosao contra o relevo real ja usado pra desenhar
+    a camada sedimentar (ver grid_contatos[1] em main()), so que avaliado
+    pontualmente em vez de numa grade. Usada como base "real" do sill
+    (construir_solido, base_fn) -- o sill ocupa o espaco entre a superficie
+    (topografia real, onde nao foi erodido) e o topo da Serra Alta, em vez de
+    uma espessura fixa arbitraria."""
+    plano = Z_REF_TILT + TREND_A * (x - TREND_X0) + TREND_B * (y - TREND_Y0) - PROFUNDIDADE_CAMADAS[1]
+    return min(plano, elevacao_fn(x, y))
 
 # deposito quaternario (aluviao de vale): usa a cota real do terreno como
 # proxy -- so aparece onde o relevo fica abaixo do limiar (~10% mais baixo
@@ -292,13 +310,19 @@ def triangular_interior(poligono, passo: float, passo_interior: float = None):
     return pontos, np.array(triangulos)
 
 
-def construir_solido(poligono, elevacao_fn, espessura=None, base_absoluta=None):
+def construir_solido(poligono, elevacao_fn, espessura=None, base_absoluta=None, base_fn=None, espessura_minima=None):
     """Extrude um poligono num solido fechado (topo drapeado no relevo real +
-    base plana/absoluta + paredes no perimetro) -- mesma logica de
+    base plana/absoluta/geologica + paredes no perimetro) -- mesma logica de
     ../scripts/06_gerar_solidos_estilizados_cubao.py. Usada tanto pro corpo
     inteiro (extensao ampla, sem recorte) quanto por estado de corte (poligono
     ja recortado pelo plano) -- como o perimetro do poligono recortado inclui
-    a nova borda reta do corte, a parede ali vira a face do corte exposta."""
+    a nova borda reta do corte, a parede ali vira a face do corte exposta.
+
+    base_fn(x, y) -> Z define uma base GEOLOGICA (ex.: topo da Serra Alta,
+    ver elevacao_serra_alta) em vez de espessura fixa/cota absoluta -- usa o
+    minimo entre base_fn e (topo - espessura_minima), pra nunca deixar o
+    solido mais fino que espessura_minima onde a base geologica fica rasa
+    demais (ou ate invertida) perto de onde o corpo aflora."""
     pontos_xy, triangulos_topo = triangular_interior(poligono, PASSO_DENSIFICACAO)
     if len(triangulos_topo) == 0:
         vazio = np.zeros((0, 3))
@@ -306,7 +330,14 @@ def construir_solido(poligono, elevacao_fn, espessura=None, base_absoluta=None):
     n = len(pontos_xy)
 
     z_topo = np.array([elevacao_fn(x, y) for x, y in pontos_xy])
-    z_base = z_topo - espessura if espessura is not None else np.full(n, base_absoluta)
+    if base_fn is not None:
+        z_geologica = np.array([base_fn(x, y) for x, y in pontos_xy])
+        piso_minimo = z_topo - (espessura_minima or 0.0)
+        z_base = np.minimum(z_geologica, piso_minimo)
+    elif espessura is not None:
+        z_base = z_topo - espessura
+    else:
+        z_base = np.full(n, base_absoluta)
 
     vertices = np.vstack([np.column_stack([pontos_xy, z_topo]), np.column_stack([pontos_xy, z_base])])
     faces = list(triangulos_topo) + [(f[0] + n, f[2] + n, f[1] + n) for f in triangulos_topo]
@@ -439,8 +470,10 @@ def montar_estado(eixo, j, invertido, grid_x, grid_y, grid_z, grid_contatos, top
     dados["quaternario_topo"] = dict(x=gx, y=gy, z=cortar(topo_quat))
     dados["quaternario_fundo"] = dict(x=gx, y=gy, z=cortar(fundo_quat))
 
-    dados["sill"] = construir_corpo_cortado(gdf_sill, elevacao_fn, eixo, valor_corte, bbox_amplo,
-                                              invertido=invertido, espessura=ESPESSURA_SILL_ESTILIZADA)
+    dados["sill"] = construir_corpo_cortado(
+        gdf_sill, elevacao_fn, eixo, valor_corte, bbox_amplo, invertido=invertido,
+        base_fn=lambda x, y: elevacao_serra_alta(x, y, elevacao_fn), espessura_minima=ESPESSURA_MINIMA_SILL,
+    )
     dados["dique"] = construir_corpo_cortado(gdf_dique, elevacao_fn, eixo, valor_corte, bbox_amplo,
                                                invertido=invertido, base_absoluta=BASE_Z_ABSOLUTA)
 
