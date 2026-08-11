@@ -22,14 +22,19 @@
   h1 b { color: #7B2FFF; }
   p.sub { opacity: 0.7; margin: 0 0 36px 0; text-align: center; max-width: 560px; }
   .cards { display: flex; gap: 20px; flex-wrap: wrap; justify-content: center; max-width: 900px; }
-  a.card {
-    display: block; width: 320px; background: #262B3D; border: 1px solid #7B2FFF; border-radius: 10px;
-    padding: 22px; text-decoration: none; color: #F2F2F2; transition: transform 0.15s, box-shadow 0.15s;
+  .card {
+    display: flex; flex-direction: column; width: 320px; background: #262B3D; border: 1px solid #7B2FFF;
+    border-radius: 10px; padding: 22px; transition: transform 0.15s, box-shadow 0.15s;
   }
-  a.card:hover { transform: translateY(-3px); box-shadow: 0 6px 20px rgba(123,47,255,0.35); }
-  a.card h2 { font-size: 17px; margin: 0 0 8px 0; color: #7B2FFF; }
-  a.card p { font-size: 13px; opacity: 0.8; margin: 0; line-height: 1.5; }
-  a.card p.repo { font-size: 11px; font-style: italic; opacity: 0.55; margin-top: 8px; }
+  .card:hover { transform: translateY(-3px); box-shadow: 0 6px 20px rgba(123,47,255,0.35); }
+  .card a.abrir { text-decoration: none; color: inherit; }
+  .card h2 { font-size: 17px; margin: 0 0 8px 0; color: #7B2FFF; }
+  .card p { font-size: 13px; opacity: 0.8; margin: 0; line-height: 1.5; }
+  .card a.repo {
+    font-size: 11px; opacity: 0.6; margin-top: 12px; color: #F2F2F2; text-decoration: none;
+    display: inline-flex; align-items: center; gap: 4px; width: fit-content;
+  }
+  .card a.repo:hover { opacity: 1; color: #7B2FFF; }
   footer { margin-top: 40px; font-size: 11px; opacity: 0.5; }
 </style>
 </head>
@@ -38,25 +43,34 @@
   <h1><b>Taió Plumbing System</b></h1>
   <p class="sub">Modelagem 3D e seção transversal interativa do sistema intrusivo (sill/dique) de Taió — Mestrado em Geologia, UFSC.</p>
   <div class="cards">
-    <a class="card" href="viewer_3d_taio.html">
-      <h2>Modelo 3D interativo</h2>
-      <p>Cubão 3D com topografia real, corpos intrusivos, formações sedimentares e ferramenta de corte com 4 direções. Modos de cor: hipsometria, geologia real (CPRM) e satélite.</p>
-    </a>
-    <a class="card" href="https://thubaraleii.github.io/taio-plumbing-system-2d/secao_interativa.html">
-      <h2>Seção transversal interativa</h2>
-      <p>Mapa em planta + seção transversal sincronizados, com linha de corte rotacionável, pontos de campo, dados estruturais e camadas de referência (rios/estradas/localidades).</p>
-      <p class="repo">Aplicação separada — repositório taio-plumbing-system-2d</p>
-    </a>
-    <a class="card" href="https://thubaraleii.github.io/TAIO-DASH/dashboard_geoquimico.html">
-      <h2>Dashboard geoquímico</h2>
-      <p>Painel com dados geoquímicos do sistema intrusivo de Taió, com visualizações para exploração dos elementos e relações geoquímicas.</p>
-      <p class="repo">Aplicação separada — repositório TAIO-DASH</p>
-    </a>
-    <a class="card" href="https://thubaraleii.github.io/TAIO-WEBMAP/webmap_taio.html">
-      <h2>Webmap</h2>
-      <p>Mapa em tela cheia com zoom/pan contínuo (Leaflet): pontos de campo, mapa geológico real (CPRM), sill/dique, dados estruturais e camadas de referência (rios/estradas/localidades).</p>
-      <p class="repo">Aplicação separada — repositório TAIO-WEBMAP</p>
-    </a>
+    <div class="card">
+      <a class="abrir" href="viewer_3d_taio.html">
+        <h2>Modelo 3D interativo</h2>
+        <p>Cubão 3D com topografia real, corpos intrusivos, formações sedimentares e ferramenta de corte com 4 direções. Modos de cor: hipsometria, geologia real (CPRM) e satélite.</p>
+      </a>
+      <a class="repo" href="https://github.com/Thubaraleii/taio-plumbing-system-3d" target="_blank" rel="noopener">GitHub ↗</a>
+    </div>
+    <div class="card">
+      <a class="abrir" href="https://thubaraleii.github.io/taio-plumbing-system-2d/secao_interativa.html">
+        <h2>Seção transversal interativa</h2>
+        <p>Mapa em planta + seção transversal sincronizados, com linha de corte rotacionável, pontos de campo, dados estruturais e camadas de referência (rios/estradas/localidades).</p>
+      </a>
+      <a class="repo" href="https://github.com/Thubaraleii/taio-plumbing-system-2d" target="_blank" rel="noopener">GitHub ↗</a>
+    </div>
+    <div class="card">
+      <a class="abrir" href="https://thubaraleii.github.io/TAIO-DASH/dashboard_geoquimico.html">
+        <h2>Dashboard geoquímico</h2>
+        <p>Painel com dados geoquímicos do sistema intrusivo de Taió, com visualizações para exploração dos elementos e relações geoquímicas.</p>
+      </a>
+      <a class="repo" href="https://github.com/Thubaraleii/TAIO-DASH" target="_blank" rel="noopener">GitHub ↗</a>
+    </div>
+    <div class="card">
+      <a class="abrir" href="https://thubaraleii.github.io/TAIO-WEBMAP/webmap_taio.html">
+        <h2>Webmap</h2>
+        <p>Mapa em tela cheia com zoom/pan contínuo (Leaflet): pontos de campo, mapa geológico real (CPRM), sill/dique, dados estruturais e camadas de referência (rios/estradas/localidades).</p>
+      </a>
+      <a class="repo" href="https://github.com/Thubaraleii/TAIO-WEBMAP" target="_blank" rel="noopener">GitHub ↗</a>
+    </div>
   </div>
   <footer>Criado por Afonso Henrique de Jesus</footer>
 </body>
