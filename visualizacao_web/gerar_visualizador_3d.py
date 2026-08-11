@@ -822,6 +822,13 @@ def main():
                          args=[{"visible": False}, [idx_pontos_campo]]),
                 ],
             ),
+            dict(
+                type="buttons", direction="left", showactive=False,
+                x=0.98, y=0.28, xanchor="right", yanchor="top",
+                bgcolor=MARCA_ROXO_ESCURO, bordercolor=MARCA_ROXO, borderwidth=1.5,
+                font=dict(color=MARCA_CINZA_CLARO, family=MARCA_FONTE),
+                buttons=[dict(label="Animação: ON", method="skip"), dict(label="Animação: OFF", method="skip")],
+            ),
         ],
         sliders=[
             dict(
@@ -979,7 +986,7 @@ def main():
                 patch['scene.' + eixo + '.zerolinecolor'] = t.grid;
                 patch['scene.' + eixo + '.color'] = t.texto;
             }});
-            for (var m = 0; m < 7; m++) {{
+            for (var m = 0; m < 8; m++) {{
                 patch['updatemenus[' + m + '].bgcolor'] = t.botaoBg;
                 patch['updatemenus[' + m + '].font.color'] = t.texto;
             }}
@@ -993,11 +1000,51 @@ def main():
             document.body.style.background = t.paper;
         }}
 
-        // 6 menus separados agora (Solido / Corte-X / Corte-Y / Cor / Tema /
-        // Topografia), cada um so com o proprio par de botoes -- roteia pela
-        // posicao do menu (y), ja que ev.active sempre vem 0 ou 1 dentro de
-        // cada par. Cor (Hipsometria/Geologia) e Topografia (ON/OFF) usam
-        // method='restyle' nativo, nao precisam de rota aqui.
+        // animacao inicial de corte: varre o corte atual (eixo Leste-Oeste,
+        // que ja comeca ativo) de "tudo cortado" (posicao 0) ate "sem corte"
+        // (ultima posicao) uma vez ao carregar a pagina -- efeito de
+        // apresentacao, mostra a ferramenta de corte sem precisar arrastar o
+        // slider manualmente. Botao "Animação: ON/OFF" liga/desliga (OFF
+        // interrompe a varredura em andamento e pula direto pro estado sem
+        // corte; ON toca de novo do zero, mesmo depois da primeira vez).
+        var animandoCorte = false;
+        var timerAnimacaoCorte = null;
+        var DURACAO_PASSO_ANIMACAO = 220;  // ms entre posicoes do corte
+
+        function pararAnimacaoCorte() {{
+            if (timerAnimacaoCorte) {{ clearTimeout(timerAnimacaoCorte); timerAnimacaoCorte = null; }}
+            animandoCorte = false;
+            var posFinal = N_CORTE - 1;
+            Plotly.relayout(gd, {{'sliders[1].active': posFinal}});
+            Plotly.animate(gd, [EIXOS[eixoAtual].nome + '_' + posFinal], {{
+                mode: 'immediate', frame: {{duration: 0, redraw: true}}, transition: {{duration: 0}},
+            }});
+        }}
+
+        function tocarAnimacaoCorte() {{
+            animandoCorte = true;
+            var p = 0;
+            function passo() {{
+                if (!animandoCorte) return;
+                Plotly.relayout(gd, {{'sliders[1].active': p}});
+                Plotly.animate(gd, [EIXOS[eixoAtual].nome + '_' + p], {{
+                    mode: 'immediate', frame: {{duration: 0, redraw: true}}, transition: {{duration: 0}},
+                }});
+                p++;
+                if (p < N_CORTE) {{
+                    timerAnimacaoCorte = setTimeout(passo, DURACAO_PASSO_ANIMACAO);
+                }} else {{
+                    animandoCorte = false;
+                }}
+            }}
+            passo();
+        }}
+
+        // 7 menus separados agora (Solido / Corte-X / Corte-Y / Cor / Tema /
+        // Topografia / Animação), cada um so com o proprio par de botoes --
+        // roteia pela posicao do menu (y), ja que ev.active sempre vem 0 ou
+        // 1 dentro de cada par. Cor (Hipsometria/Geologia) e Topografia
+        // (ON/OFF) usam method='restyle' nativo, nao precisam de rota aqui.
         gd.on('plotly_buttonclicked', function(ev) {{
             if (typeof ev.active !== 'number' || !ev.menu) return;
             if (Math.abs(ev.menu.y - 0.98) < 0.001) {{
@@ -1008,8 +1055,12 @@ def main():
                 irParaEixo(2 + ev.active);  // 2=Norte-Sul, 3=Sul-Norte
             }} else if (Math.abs(ev.menu.y - 0.58) < 0.001) {{
                 aplicarTema(ev.active === 0 ? 'escuro' : 'claro');
+            }} else if (Math.abs(ev.menu.y - 0.28) < 0.001) {{
+                if (ev.active === 0) {{ tocarAnimacaoCorte(); }} else {{ pararAnimacaoCorte(); }}
             }}
         }});
+
+        setTimeout(tocarAnimacaoCorte, 600);
     }})();
     """
 
