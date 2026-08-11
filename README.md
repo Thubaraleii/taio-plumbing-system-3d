@@ -20,4 +20,5 @@ Cada visualizador web é uma aplicação separada, com repositório próprio
 - [TAIO-DASH](https://github.com/Thubaraleii/TAIO-DASH) — dashboard geoquímico
 - [TAIO-WEBMAP](https://github.com/Thubaraleii/TAIO-WEBMAP) — webmap em tela cheia
 
-`visualizacao_web/index.html` (este repositório) é o hub que linka pros 4.
+A página inicial que linka pros 4 tem repositório próprio também:
+[TAIO-HUB](https://github.com/Thubaraleii/TAIO-HUB).
