@@ -1,6 +1,5 @@
-# 1_Modelo_3D_Taio — pasta principal do projeto
+_Modelo_3D_Taio 
 
-Esta é a pasta **main** do mestrado: o modelo 3D do plumbing system intrusivo de Taió. Todas as outras pastas numeradas que virão a seguir (2_, 3_, 4_...) são subsídios para chegar até aqui — geoprocessamento, dados de campo, geoquímica, etc. As pastas antigas (`0_ORGANIZADO\01_...` a `04_...`) continuam existindo como base/arquivo de referência, fora dessa nova numeração.
 
 ## Objetivo
 
