@@ -26,7 +26,7 @@ from scipy.spatial import Delaunay
 from shapely.geometry import Point, box
 from shapely.prepared import prep
 
-BASE = Path(r"C:\Users\thuba\Desktop\Mestrado\1_Modelo_3D_Taio")
+BASE = Path(__file__).parent.parent
 TOPO_NPY = BASE / "dados_entrada" / "topografia_drone" / "topografia_xyz.npy"
 SATELITE_CACHE_DIR = BASE / "dados_entrada" / "satelite_esri"
 SATELITE_CACHE_NPY = SATELITE_CACHE_DIR / "satelite_utm.npy"
@@ -91,7 +91,9 @@ PASSO_INTERIOR_DECAL = 2100.0  # grade de pontos internos pros decalques geologi
 # "paredes_caixa" ja desenha a sequencia estratigrafica inteira em qualquer
 # borda da grade, a nova borda cortada vira automaticamente a face exposta
 # (corte reto mostrando as camadas por dentro).
-N_CORTE = 13
+N_CORTE = 9  # baixado de 13 -> 9 (10/08/2026) pra caber no limite de ~100MB por arquivo do
+# GitHub Pages (com 13 posicoes x 4 modos o HTML passou de 100MB e o Pages descartava o
+# arquivo silenciosamente, 404 mesmo com o site publicado)
 J_MIN_CORTE = 12  # minimo de colunas/linhas mantidas (evita um bloco degenerado no extremo)
 
 # 5 formacoes sedimentares REAIS (Bacia do Parana, Grupo Guata/Passa Dois),
@@ -979,6 +981,14 @@ def main():
     """
 
     fig.write_html(str(OUT_HTML), include_plotlyjs="inline", full_html=True, post_script=post_script)
+    favicon_tags = (
+        '<link rel="icon" type="image/png" href="assets/favicon.png">'
+        '<link rel="shortcut icon" href="assets/favicon.ico">'
+        '<link rel="apple-touch-icon" href="assets/apple-touch-icon.png">'
+    )
+    html_txt = OUT_HTML.read_text(encoding="utf-8")
+    html_txt = html_txt.replace('<head><meta charset="utf-8" /></head>', f'<head><meta charset="utf-8" />{favicon_tags}</head>', 1)
+    OUT_HTML.write_text(html_txt, encoding="utf-8")
     print(f"\nSalvo em: {OUT_HTML}")
 
 
