@@ -6,3 +6,13 @@ __pycache__/
 .claude/
 .vscode/
 dados_entrada/satelite_esri/
+dados_entrada/satelite_dashboard/
+cache/
+
+# produtos que viraram repositorios proprios (taio-plumbing-system-2d, TAIO-DASH, TAIO-WEBMAP)
+visualizacao_web/secao_interativa.html
+visualizacao_web/gerar_secao_interativa.py
+visualizacao_web/dashboard_geoquimico.html
+visualizacao_web/gerar_dashboard_geoquimico.py
+visualizacao_web/webmap_taio.html
+visualizacao_web/gerar_webmap_taio.py
