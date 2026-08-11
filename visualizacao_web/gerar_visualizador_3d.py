@@ -1002,11 +1002,11 @@ def main():
 
         // animacao inicial de corte: varre o corte atual (eixo Leste-Oeste,
         // que ja comeca ativo) de "tudo cortado" (posicao 0) ate "sem corte"
-        // (ultima posicao) uma vez ao carregar a pagina -- efeito de
-        // apresentacao, mostra a ferramenta de corte sem precisar arrastar o
-        // slider manualmente. Botao "Animação: ON/OFF" liga/desliga (OFF
-        // interrompe a varredura em andamento e pula direto pro estado sem
-        // corte; ON toca de novo do zero, mesmo depois da primeira vez).
+        // (ultima posicao) e volta, em loop continuo (vaivem/bounce) enquanto
+        // ligada -- comeca sozinha ao carregar a pagina (efeito de
+        // apresentacao). Botao "Animação: ON/OFF" liga/desliga (OFF
+        // interrompe o loop e pula direto pro estado sem corte; ON toca de
+        // novo a qualquer momento).
         var animandoCorte = false;
         var timerAnimacaoCorte = null;
         var DURACAO_PASSO_ANIMACAO = 220;  // ms entre posicoes do corte
@@ -1024,18 +1024,16 @@ def main():
         function tocarAnimacaoCorte() {{
             animandoCorte = true;
             var p = 0;
+            var direcao = 1;
             function passo() {{
                 if (!animandoCorte) return;
                 Plotly.relayout(gd, {{'sliders[1].active': p}});
                 Plotly.animate(gd, [EIXOS[eixoAtual].nome + '_' + p], {{
                     mode: 'immediate', frame: {{duration: 0, redraw: true}}, transition: {{duration: 0}},
                 }});
-                p++;
-                if (p < N_CORTE) {{
-                    timerAnimacaoCorte = setTimeout(passo, DURACAO_PASSO_ANIMACAO);
-                }} else {{
-                    animandoCorte = false;
-                }}
+                if (p === N_CORTE - 1) {{ direcao = -1; }} else if (p === 0) {{ direcao = 1; }}
+                p += direcao;
+                timerAnimacaoCorte = setTimeout(passo, DURACAO_PASSO_ANIMACAO);
             }}
             passo();
         }}
