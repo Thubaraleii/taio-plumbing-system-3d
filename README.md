@@ -23,9 +23,6 @@ Cada visualizador web é uma aplicação separada, com repositório próprio
 
 `visualizacao_web/index.html` (este repositório) é o hub que linka pros 4.
 
-## Status (atualizado em 30/07/2026)
-
-- **Dados estruturais reais já ligados**: `2_Banco_de_Dados` extraiu 158 pontos de contato e 104 orientações de campo dos shapefiles que já existiam em `0_ORGANIZADO` (ver `2_Banco_de_Dados/README.md`), e eles já estão em `dados_entrada/pontos_estruturais/`. `EXTENT` e `PILHA_ESTRATIGRAFICA` em `scripts/02_montar_modelo_gempy.py` já foram ajustados para a área e as formações reais (`sill_diabasio`, `encaixante_sedimentar`).
 - **Primeiro resultado já gerado**: `exports/meshes/sill_diabasio.obj` e `exports/meshes/encaixante_sedimentar.obj` — já dá pra abrir no Blender agora, mesmo sem topografia (ver pendência abaixo).
 - **Pendente**: topografia real. O MDE que já existia em `0_ORGANIZADO` não tem elevação em metros de verdade (é um raster normalizado 0-1) — ver `dados_entrada/topografia_drone/README.md` para o que fazer. Sem isso, o modelo roda só em subsuperfície (sem o relevo real por cima).
 - Todo o pipeline (scripts 00 a 03) foi testado de ponta a ponta nesta sessão, tanto com dados sintéticos quanto com os dados reais de campo, usando GemPy 2026.0.3 (API v3).
