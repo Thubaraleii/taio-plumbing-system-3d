@@ -42,7 +42,8 @@ FONTE_TEXTURA = "satelite"
 # paleta hipsometrica customizada (baixo -> alto), mesma usada no
 # visualizador Plotly (blender/visualizacao_publico/scripts_bpy nao,
 # esse le o PNG gerado aqui -- ver viewer_3d.py pro Plotly)
-CORES_HIPSOMETRICAS = ["#A66A2C", "#C6924A", "#D8C88C", "#9FC1A3", "#4F9AA8"]
+CORES_HIPSOMETRICAS = ["#4F9AA8", "#9FC1A3", "#D8C88C", "#C6924A", "#A66A2C"]  # rampa invertida
+# (10/08/2026) -- baixo->alto agora vai de azul/verde pra marrom (era o oposto)
 COLORMAP = LinearSegmentedColormap.from_list("hipsometrico_taio", CORES_HIPSOMETRICAS)
 
 OBJ_PATH = EXPORTS_DIR / "topografia.obj"

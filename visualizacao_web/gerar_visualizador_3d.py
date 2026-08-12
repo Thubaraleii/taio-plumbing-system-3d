@@ -162,7 +162,8 @@ COR_QUATERNARIO = "#D9CB82"
 
 # paleta hipsometrica customizada (baixo -> alto), mesma de
 # ../scripts/04_exportar_topografia_para_blender.py
-CORES_HIPSOMETRICAS = ["#A66A2C", "#C6924A", "#D8C88C", "#9FC1A3", "#4F9AA8"]
+CORES_HIPSOMETRICAS = ["#4F9AA8", "#9FC1A3", "#D8C88C", "#C6924A", "#A66A2C"]  # rampa invertida
+# (10/08/2026) -- baixo->alto agora vai de azul/verde pra marrom (era o oposto)
 COLORSCALE_HIPSOMETRICO = [[i / (len(CORES_HIPSOMETRICAS) - 1), cor] for i, cor in enumerate(CORES_HIPSOMETRICAS)]
 
 # mapa geologico REAL (CPRM) drapeado no terreno como "decalque" vetorial
