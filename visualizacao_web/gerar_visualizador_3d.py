@@ -97,9 +97,9 @@ PASSO_INTERIOR_DECAL = 2100.0  # grade de pontos internos pros decalques geologi
 # "paredes_caixa" ja desenha a sequencia estratigrafica inteira em qualquer
 # borda da grade, a nova borda cortada vira automaticamente a face exposta
 # (corte reto mostrando as camadas por dentro).
-N_CORTE = 5  # baixado de 13 -> 9 -> 5 (10/08/2026) -- mesmo 9 posicoes (68,8MB) ainda dava 404
-# no GitHub Pages, entao o limite real e bem menor que os 100MB do git; testando valores
-# menores ate achar um tamanho que o Pages realmente sirva
+N_CORTE = 9  # 13 -> 9 -> 5 -> 9 (12/08/2026) -- o 404 que causou a reducao pra 5 era um erro de
+# URL de teste (faltava /visualizacao_web/ no caminho, nao um limite real do Pages), entao
+# voltou pra 9 posicoes pra dar um intervalo mais fino no slider de corte.
 J_MIN_CORTE = 12  # minimo de colunas/linhas mantidas (evita um bloco degenerado no extremo)
 
 # 5 formacoes sedimentares REAIS (Bacia do Parana, Grupo Guata/Passa Dois),
