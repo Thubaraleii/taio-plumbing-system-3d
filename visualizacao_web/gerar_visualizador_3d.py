@@ -761,7 +761,7 @@ def main():
                 x=0.98, y=0.98, xanchor="right", yanchor="top",
                 bgcolor=MARCA_ROXO_ESCURO, bordercolor=MARCA_ROXO, borderwidth=1.5,
                 font=dict(color=MARCA_CINZA_CLARO, family=MARCA_FONTE),
-                buttons=[dict(label="Sólido: ON", method="skip"), dict(label="Sólido: OFF", method="skip")],
+                buttons=[dict(label="Sólido: OFF", method="skip")],
             ),
             dict(
                 type="buttons", direction="left", showactive=False,
@@ -806,29 +806,21 @@ def main():
                 x=0.98, y=0.48, xanchor="right", yanchor="top",
                 bgcolor=MARCA_ROXO_ESCURO, bordercolor=MARCA_ROXO, borderwidth=1.5,
                 font=dict(color=MARCA_CINZA_CLARO, family=MARCA_FONTE),
-                buttons=[
-                    dict(label="Topografia: ON", method="restyle", args=[{"visible": True}, [0]]),
-                    dict(label="Topografia: OFF", method="restyle", args=[{"visible": False}, [0]]),
-                ],
+                buttons=[dict(label="Topografia: ON", method="skip")],
             ),
             dict(
                 type="buttons", direction="left", showactive=False,
                 x=0.98, y=0.38, xanchor="right", yanchor="top",
                 bgcolor=MARCA_ROXO_ESCURO, bordercolor=MARCA_ROXO, borderwidth=1.5,
                 font=dict(color=MARCA_CINZA_CLARO, family=MARCA_FONTE),
-                buttons=[
-                    dict(label="Pontos de Campo: ON", method="restyle",
-                         args=[{"visible": True}, [idx_pontos_campo]]),
-                    dict(label="Pontos de Campo: OFF", method="restyle",
-                         args=[{"visible": False}, [idx_pontos_campo]]),
-                ],
+                buttons=[dict(label="Pontos de Campo: OFF", method="skip")],
             ),
             dict(
                 type="buttons", direction="left", showactive=False,
                 x=0.98, y=0.28, xanchor="right", yanchor="top",
                 bgcolor=MARCA_ROXO_ESCURO, bordercolor=MARCA_ROXO, borderwidth=1.5,
                 font=dict(color=MARCA_CINZA_CLARO, family=MARCA_FONTE),
-                buttons=[dict(label="Animação: ON", method="skip"), dict(label="Animação: OFF", method="skip")],
+                buttons=[dict(label="Animação: ON", method="skip")],
             ),
         ],
         sliders=[
@@ -912,6 +904,7 @@ def main():
     {marca_html}
     (function() {{
         var N_CORTE = {N_CORTE};
+        var INDICE_PONTOS_CAMPO = {idx_pontos_campo};
         var EIXOS = [
         {eixos_js}
         ];
@@ -957,6 +950,39 @@ def main():
                 Plotly.restyle(gd, {{opacity: step.args[0].opacity}}, [0]);
                 Plotly.restyle(gd, {{opacity: 0.95}}, INDICES_SOLIDO.slice(1));
             }}
+        }}
+
+        // botoes de liga/desliga (Solido, Topografia, Pontos de Campo) viram
+        // um clique so (alterna estado) em vez de par ON/OFF -- so os
+        // seletores tematicos (direcao do corte, cor, tema) continuam com
+        // varios botoes, ja que sao uma ESCOLHA entre opcoes, nao um
+        // liga/desliga de verdade. indiceMenu = posicao em updatemenus,
+        // usado pra atualizar o texto do proprio botao depois do clique.
+        function atualizarLabelBotao(indiceMenu, texto) {{
+            var patch = {{}};
+            patch['updatemenus[' + indiceMenu + '].buttons[0].label'] = texto;
+            Plotly.relayout(gd, patch);
+        }}
+
+        var solidoAtivo = false;
+        function alternarSolido() {{
+            solidoAtivo = !solidoAtivo;
+            irParaSolido(solidoAtivo);
+            atualizarLabelBotao(0, solidoAtivo ? 'Sólido: ON' : 'Sólido: OFF');
+        }}
+
+        var topografiaAtiva = true;
+        function alternarTopografia() {{
+            topografiaAtiva = !topografiaAtiva;
+            Plotly.restyle(gd, {{visible: topografiaAtiva}}, [0]);
+            atualizarLabelBotao(5, topografiaAtiva ? 'Topografia: ON' : 'Topografia: OFF');
+        }}
+
+        var pontosCampoAtivos = false;
+        function alternarPontosCampo() {{
+            pontosCampoAtivos = !pontosCampoAtivos;
+            Plotly.restyle(gd, {{visible: pontosCampoAtivos}}, [INDICE_PONTOS_CAMPO]);
+            atualizarLabelBotao(6, pontosCampoAtivos ? 'Pontos de Campo: ON' : 'Pontos de Campo: OFF');
         }}
 
         // tema claro/escuro -- cores dos corpos/camadas/decalques sao
@@ -1039,23 +1065,37 @@ def main():
             passo();
         }}
 
-        // 7 menus separados agora (Solido / Corte-X / Corte-Y / Cor / Tema /
-        // Topografia / Animação), cada um so com o proprio par de botoes --
-        // roteia pela posicao do menu (y), ja que ev.active sempre vem 0 ou
-        // 1 dentro de cada par. Cor (Hipsometria/Geologia) e Topografia
-        // (ON/OFF) usam method='restyle' nativo, nao precisam de rota aqui.
+        function alternarAnimacao() {{
+            if (animandoCorte) {{
+                pararAnimacaoCorte();
+                atualizarLabelBotao(7, 'Animação: OFF');
+            }} else {{
+                tocarAnimacaoCorte();
+                atualizarLabelBotao(7, 'Animação: ON');
+            }}
+        }}
+
+        // menus tematicos (escolha entre opcoes: direcao do corte, cor,
+        // tema) continuam com varios botoes -- roteados pela posicao do menu
+        // (y), ja que ev.active vem 0/1/2 dentro do grupo. Os liga/desliga
+        // de verdade (Solido/Topografia/Pontos de Campo/Animação) agora sao
+        // menu de 1 botao so (ev.active sempre 0), tratado como alternancia.
         gd.on('plotly_buttonclicked', function(ev) {{
             if (typeof ev.active !== 'number' || !ev.menu) return;
             if (Math.abs(ev.menu.y - 0.98) < 0.001) {{
-                irParaSolido(ev.active === 0);
+                alternarSolido();
             }} else if (Math.abs(ev.menu.y - 0.88) < 0.001) {{
                 irParaEixo(ev.active);  // 0=Leste-Oeste, 1=Oeste-Leste
             }} else if (Math.abs(ev.menu.y - 0.78) < 0.001) {{
                 irParaEixo(2 + ev.active);  // 2=Norte-Sul, 3=Sul-Norte
             }} else if (Math.abs(ev.menu.y - 0.58) < 0.001) {{
                 aplicarTema(ev.active === 0 ? 'escuro' : 'claro');
+            }} else if (Math.abs(ev.menu.y - 0.48) < 0.001) {{
+                alternarTopografia();
+            }} else if (Math.abs(ev.menu.y - 0.38) < 0.001) {{
+                alternarPontosCampo();
             }} else if (Math.abs(ev.menu.y - 0.28) < 0.001) {{
-                if (ev.active === 0) {{ tocarAnimacaoCorte(); }} else {{ pararAnimacaoCorte(); }}
+                alternarAnimacao();
             }}
         }});
 
