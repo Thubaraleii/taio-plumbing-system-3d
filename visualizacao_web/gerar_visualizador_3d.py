@@ -178,8 +178,8 @@ COLORSCALE_HIPSOMETRICO = [[i / (len(CORES_HIPSOMETRICAS) - 1), cor] for i, cor 
 # em ../../2_Banco_de_Dados/scripts_etl/exportar_poligonos_cprm.py. Mesma
 # paleta das camadas (+ Serra Geral/aluviao/outros/sill+dique novos --
 # K_TPS_SILL/K_TPS_DIQUE, mesma cor dos corpos solidos do cubao).
-ORDEM_FORMACOES = NOMES_CAMADAS + ["Depósito quaternário"]
-CORES_FORMACOES = CORES_CAMADAS + [COR_QUATERNARIO]
+ORDEM_FORMACOES = NOMES_CAMADAS + ["Depósito quaternário", "Soleira", "Dique"]
+CORES_FORMACOES = CORES_CAMADAS + [COR_QUATERNARIO, COR_SILL, COR_DIQUE]
 CORES_FORMACOES_MAPA = dict(zip(ORDEM_FORMACOES, CORES_FORMACOES))
 OFFSET_DECAL_Z = 3.0  # decalque um pouco acima do terreno, evita z-fighting
 
@@ -537,9 +537,16 @@ def main():
     margem = 2000.0
     bbox_amplo = (xmin - margem, ymin - margem, xmax + margem, ymax + margem)
 
-    gdf_formacoes = gdf_lito[gdf_lito["tipo"] == "sedimentar"]
-    formacoes_geoms = {row.formacao: [row.geometry] for row in gdf_formacoes.itertuples()}
-    print(f"Mapa geologico atualizado: {len(gdf_formacoes)} formacoes ({', '.join(formacoes_geoms)})")
+    # inclui sill/dique tambem como decalque plano (alem dos solidos sempre
+    # visiveis, dados["sill"]/dados["dique"]) -- senao o modo "Geologia"
+    # (mapa em planta flat) ficava com um "buraco" sem cor onde tem
+    # intrusiva, ja que so as 6 formacoes sedimentares entravam no decalque.
+    # groupby (nao dict comprehension direto) porque cada formacao intrusiva
+    # tem VARIOS poligonos (um por lobo/corpo), nao um so como as sedimentares
+    # ja dissolvidas -- um dict comprehension simples sobrescreveria e
+    # deixaria so o ultimo lobo.
+    formacoes_geoms = gdf_lito.groupby("formacao")["geometry"].apply(list).to_dict()
+    print(f"Mapa geologico atualizado: {len(gdf_lito)} polígonos ({', '.join(formacoes_geoms)})")
     zmin_hipso, zmax_hipso = float(grid_z.min()), float(grid_z.max())
 
     # satelite Esri (placeholder ate ter ortomosaico proprio, ver obter_satelite_utm) -- amostrado
