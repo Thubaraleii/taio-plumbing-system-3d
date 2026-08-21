@@ -18,6 +18,7 @@ from pathlib import Path
 
 import geopandas as gpd
 import numpy as np
+import pandas as pd
 import plotly.graph_objects as go
 from rasterio.transform import from_bounds
 from rasterio.warp import reproject, Resampling
@@ -44,6 +45,9 @@ LITOLOGIA_ATUALIZADA = BASE.parent / "2_Banco_de_Dados" / "dados_base" / "litolo
 PONTOS_CAMPO_GPKG = (
     BASE.parent / "2_Banco_de_Dados" / "Unificação" / "GPKG_Novos" / "pontos_unificados_completo.gpkg"
 )
+GEOQUIMICA_CSV = BASE.parent / "2_Banco_de_Dados" / "QMC_TAIO_TODOS" / "geoquimica_dashboard.csv"
+COR_TI_ALTO = "#E67E22"
+COR_TI_BAIXO = "#2E86C1"
 LOGO_PATH = Path(__file__).parent / "assets" / "logo_gstech.jpg"
 OUT_HTML = Path(__file__).parent / "viewer_3d_taio.html"
 
@@ -710,6 +714,38 @@ def main():
             name="Pontos de Campo", showlegend=False, visible=False,
         ))
 
+    # geoquimica bruta real (QMC_TAIO_TODOS, 41 amostras), coloridas por
+    # classificacao Alto/Baixo-Ti -- trace 3D fixa, mesmo padrao dos Pontos
+    # de Campo (nao clipada pelo corte, toggle proprio). 3 amostras de
+    # referencia (sem ponto/corpo associado) ficam de fora por nao terem
+    # coordenada real; as demais com ponto_id mas sem utm_e/utm_n na planilha
+    # (ex.: ITC-44B) usam a coordenada do ponto de campo correspondente.
+    idx_geoq = len(fig.data)
+    if GEOQUIMICA_CSV.exists():
+        df_geoq = pd.read_csv(GEOQUIMICA_CSV)
+        if PONTOS_CAMPO_GPKG.exists():
+            coord_campo = {row.ponto_id: (row.geometry.x, row.geometry.y) for row in gdf_campo.itertuples()}
+            for i, row in df_geoq.iterrows():
+                if pd.isna(row["utm_e"]) and pd.notna(row["ponto_id"]):
+                    xy = coord_campo.get(row["ponto_id"])
+                    if xy:
+                        df_geoq.loc[i, "utm_e"], df_geoq.loc[i, "utm_n"] = xy
+        df_geoq_coord = df_geoq.dropna(subset=["utm_e", "utm_n"])
+        z_geoq = [elevacao_fn(x, y) for x, y in zip(df_geoq_coord["utm_e"], df_geoq_coord["utm_n"])]
+        cores_geoq = [COR_TI_ALTO if t == "Alto-Ti" else COR_TI_BAIXO for t in df_geoq_coord["classificacao_ti"]]
+        hover_geoq = [
+            f"<b>{row.amostra}</b> ({row.classificacao_ti})<br>{row.origem}<br>"
+            f"TiO₂ {row.TiO2:.2f}% · SiO₂ {row.SiO2:.1f}%"
+            for row in df_geoq_coord.itertuples()
+        ]
+        fig.add_trace(go.Scatter3d(
+            x=df_geoq_coord["utm_e"], y=df_geoq_coord["utm_n"], z=z_geoq,
+            mode="markers",
+            marker=dict(size=5, symbol="diamond", color=cores_geoq, line=dict(color=MARCA_CINZA_CLARO, width=0.5)),
+            text=hover_geoq, hoverinfo="text",
+            name="Geoquímica (Alto/Baixo-Ti)", showlegend=False, visible=False,
+        ))
+
     idx_geo_inicio = 1 + len(ORDEM_TRACES_RESTO) - len(CHAVES_GEO) - 1  # indice da 1a trace de decalque
     idx_satelite_trace = 1 + len(ORDEM_TRACES_RESTO) - 1  # ultimo item de ORDEM_TRACES_RESTO
 
@@ -831,6 +867,13 @@ def main():
                     dict(label="Girar: ON", method="skip"),
                 ],
             ),
+            dict(
+                type="buttons", direction="left", showactive=False,
+                x=0.98, y=0.18, xanchor="right", yanchor="top",
+                bgcolor=MARCA_ROXO_ESCURO, bordercolor=MARCA_ROXO, borderwidth=1.5,
+                font=dict(color=MARCA_CINZA_CLARO, family=MARCA_FONTE),
+                buttons=[dict(label="Geoquímica: OFF", method="skip")],
+            ),
         ],
         sliders=[
             dict(
@@ -914,6 +957,7 @@ def main():
     (function() {{
         var N_CORTE = {N_CORTE};
         var INDICE_PONTOS_CAMPO = {idx_pontos_campo};
+        var INDICE_GEOQUIMICA = {idx_geoq};
         var EIXOS = [
         {eixos_js}
         ];
@@ -995,6 +1039,13 @@ def main():
             atualizarLabelBotao(6, pontosCampoAtivos ? 'Pontos de Campo: ON' : 'Pontos de Campo: OFF');
         }}
 
+        var geoquimicaAtiva = false;
+        function alternarGeoquimica() {{
+            geoquimicaAtiva = !geoquimicaAtiva;
+            Plotly.restyle(gd, {{visible: geoquimicaAtiva}}, [INDICE_GEOQUIMICA]);
+            atualizarLabelBotao(8, geoquimicaAtiva ? 'Geoquímica: ON' : 'Geoquímica: OFF');
+        }}
+
         // tema claro/escuro -- cores dos corpos/camadas/decalques sao
         // proprias (nao mudam), so a "moldura" (fundo, eixos 3d, legenda,
         // botoes, slider, colorbar) muda.
@@ -1023,7 +1074,7 @@ def main():
                 patch['scene.' + eixo + '.zerolinecolor'] = t.grid;
                 patch['scene.' + eixo + '.color'] = t.texto;
             }});
-            for (var m = 0; m < 8; m++) {{
+            for (var m = 0; m < 9; m++) {{
                 patch['updatemenus[' + m + '].bgcolor'] = t.botaoBg;
                 patch['updatemenus[' + m + '].font.color'] = t.texto;
             }}
@@ -1163,6 +1214,8 @@ def main():
                 alternarPontosCampo();
             }} else if (Math.abs(ev.menu.y - 0.28) < 0.001) {{
                 if (ev.active === 0) {{ alternarAnimacao(); }} else {{ alternarGiro(); }}
+            }} else if (Math.abs(ev.menu.y - 0.18) < 0.001) {{
+                alternarGeoquimica();
             }}
         }});
 
