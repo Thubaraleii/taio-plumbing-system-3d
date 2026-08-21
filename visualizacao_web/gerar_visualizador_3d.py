@@ -36,10 +36,11 @@ SATELITE_RESOLUCAO = 2000  # resolucao (pixels/eixo) do raster UTM cacheado -- s
 SATELITE_ZOOM = 17  # nivel de zoom das tiles Esri World Imagery -- 17 = boa nitidez pro Blender
 # (mesh mais fina, RESOLUCAO=500 em 04_exportar_topografia_para_blender.py); pro visualizador web
 # (grade de corte bem mais grossa, 63x63) o zoom real quase nao importa, a grade que limita.
-POLIGONO_INTRUSIVA = BASE.parent / "2_Banco_de_Dados" / "dados_base" / "poligon_intrusiva.shp"
-POLIGONOS_CPRM_GEOJSON = (
-    BASE.parent / "2_Banco_de_Dados" / "saida_processada" / "formacoes_cprm_poligonos.geojson"
-)
+# litologia_processada.shp (ETL: 2_Banco_de_Dados/scripts_etl/processar_litologia_atualizada.py)
+# substitui o mapa geologico real (CPRM) + o poligon_intrusiva.shp antigo --
+# um shp so, com sill/dique redigitalizados (coluna "formacao") e as 6
+# formacoes sedimentares (coluna "tipo" == "sedimentar"/"intrusiva").
+LITOLOGIA_ATUALIZADA = BASE.parent / "2_Banco_de_Dados" / "dados_base" / "litologia_processada.shp"
 PONTOS_CAMPO_GPKG = (
     BASE.parent / "2_Banco_de_Dados" / "Unificação" / "GPKG_Novos" / "pontos_unificados_completo.gpkg"
 )
@@ -177,10 +178,8 @@ COLORSCALE_HIPSOMETRICO = [[i / (len(CORES_HIPSOMETRICAS) - 1), cor] for i, cor 
 # em ../../2_Banco_de_Dados/scripts_etl/exportar_poligonos_cprm.py. Mesma
 # paleta das camadas (+ Serra Geral/aluviao/outros/sill+dique novos --
 # K_TPS_SILL/K_TPS_DIQUE, mesma cor dos corpos solidos do cubao).
-ORDEM_FORMACOES = NOMES_CAMADAS + [
-    "Serra Geral (sill/dique)", "Aluvião quaternário", "K_TPS_SILL", "K_TPS_DIQUE", "Outros",
-]
-CORES_FORMACOES = CORES_CAMADAS + ["#A63D2F", "#D9CB82", COR_SILL, COR_DIQUE, "#CCCCCC"]
+ORDEM_FORMACOES = NOMES_CAMADAS + ["Depósito quaternário"]
+CORES_FORMACOES = CORES_CAMADAS + [COR_QUATERNARIO]
 CORES_FORMACOES_MAPA = dict(zip(ORDEM_FORMACOES, CORES_FORMACOES))
 OFFSET_DECAL_Z = 3.0  # decalque um pouco acima do terreno, evita z-fighting
 
@@ -530,17 +529,17 @@ def main():
     topo_quat = np.where(mascara_quat, grid_z + OFFSET_QUATERNARIO_Z, np.nan)
     fundo_quat = np.where(mascara_quat, grid_z - QUATERNARIO_ESPESSURA_REAL, np.nan)
 
-    gdf_intrusiva = gpd.read_file(POLIGONO_INTRUSIVA)
-    gdf_sill = gdf_intrusiva[gdf_intrusiva["tipo"] == "Soleira"]
-    gdf_dique = gdf_intrusiva[gdf_intrusiva["tipo"] == "Dique"]
-    print(f"sill: {len(gdf_sill)} lobos, dique: {len(gdf_dique)} corpos (poligonos reais, ver poligon_intrusiva.shp)")
+    gdf_lito = gpd.read_file(LITOLOGIA_ATUALIZADA)
+    gdf_sill = gdf_lito[gdf_lito["formacao"] == "Soleira"]
+    gdf_dique = gdf_lito[gdf_lito["formacao"] == "Dique"]
+    print(f"sill: {len(gdf_sill)} lobos, dique: {len(gdf_dique)} corpos (poligonos atualizados, ver litologia_processada.shp)")
     elevacao_fn = montar_elevador(xyz)
     margem = 2000.0
     bbox_amplo = (xmin - margem, ymin - margem, xmax + margem, ymax + margem)
 
-    gdf_formacoes = gpd.read_file(POLIGONOS_CPRM_GEOJSON)
+    gdf_formacoes = gdf_lito[gdf_lito["tipo"] == "sedimentar"]
     formacoes_geoms = {row.formacao: [row.geometry] for row in gdf_formacoes.itertuples()}
-    print(f"Mapa geologico real: {len(gdf_formacoes)} formacoes ({', '.join(formacoes_geoms)})")
+    print(f"Mapa geologico atualizado: {len(gdf_formacoes)} formacoes ({', '.join(formacoes_geoms)})")
     zmin_hipso, zmax_hipso = float(grid_z.min()), float(grid_z.max())
 
     # satelite Esri (placeholder ate ter ortomosaico proprio, ver obter_satelite_utm) -- amostrado
@@ -820,7 +819,10 @@ def main():
                 x=0.98, y=0.28, xanchor="right", yanchor="top",
                 bgcolor=MARCA_ROXO_ESCURO, bordercolor=MARCA_ROXO, borderwidth=1.5,
                 font=dict(color=MARCA_CINZA_CLARO, family=MARCA_FONTE),
-                buttons=[dict(label="Animação: ON", method="skip")],
+                buttons=[
+                    dict(label="Corte: ON", method="skip"),
+                    dict(label="Girar: ON", method="skip"),
+                ],
             ),
         ],
         sliders=[
@@ -958,9 +960,10 @@ def main():
         // varios botoes, ja que sao uma ESCOLHA entre opcoes, nao um
         // liga/desliga de verdade. indiceMenu = posicao em updatemenus,
         // usado pra atualizar o texto do proprio botao depois do clique.
-        function atualizarLabelBotao(indiceMenu, texto) {{
+        function atualizarLabelBotao(indiceMenu, texto, indiceBotao) {{
+            indiceBotao = indiceBotao || 0;
             var patch = {{}};
-            patch['updatemenus[' + indiceMenu + '].buttons[0].label'] = texto;
+            patch['updatemenus[' + indiceMenu + '].buttons[' + indiceBotao + '].label'] = texto;
             Plotly.relayout(gd, patch);
         }}
 
@@ -1068,18 +1071,75 @@ def main():
         function alternarAnimacao() {{
             if (animandoCorte) {{
                 pararAnimacaoCorte();
-                atualizarLabelBotao(7, 'Animação: OFF');
+                atualizarLabelBotao(7, 'Corte: OFF', 0);
             }} else {{
                 tocarAnimacaoCorte();
-                atualizarLabelBotao(7, 'Animação: ON');
+                atualizarLabelBotao(7, 'Corte: ON', 0);
             }}
         }}
+
+        // giro continuo da camera em torno do modelo -- comeca sozinho ao
+        // carregar a pagina (efeito de apresentacao) e roda enquanto ligado.
+        // Botao "Girar" (mesma linha do "Corte") liga/desliga a qualquer
+        // momento. Se o usuario arrastar/rolar a cena manualmente o giro
+        // para sozinho e o botao sincroniza pra "OFF" (senao a rotacao
+        // automatica ficaria brigando com o orbit control do usuario).
+        var CAMERA_RAIO_GIRO = Math.sqrt(1.25 * 1.25 + 1.25 * 1.25);
+        var CAMERA_Z_GIRO = 1.25;
+        var ANGULO_PASSO_GIRO = (2 * Math.PI) / 90;  // 90 passos por volta
+        var DURACAO_PASSO_GIRO = 70;  // ms -> ~6.3s por volta completa
+        var anguloGiroAtual = Math.atan2(1.25, 1.25);
+        var girando = false;
+        var timerGiro = null;
+
+        function pararGiro() {{
+            if (timerGiro) {{ clearTimeout(timerGiro); timerGiro = null; }}
+            girando = false;
+        }}
+
+        function tocarGiro() {{
+            girando = true;
+            function passo() {{
+                if (!girando) return;
+                anguloGiroAtual = (anguloGiroAtual + ANGULO_PASSO_GIRO) % (2 * Math.PI);
+                Plotly.relayout(gd, {{
+                    'scene.camera.eye': {{
+                        x: CAMERA_RAIO_GIRO * Math.cos(anguloGiroAtual),
+                        y: CAMERA_RAIO_GIRO * Math.sin(anguloGiroAtual),
+                        z: CAMERA_Z_GIRO,
+                    }},
+                }});
+                timerGiro = setTimeout(passo, DURACAO_PASSO_GIRO);
+            }}
+            passo();
+        }}
+
+        function alternarGiro() {{
+            if (girando) {{
+                pararGiro();
+                atualizarLabelBotao(7, 'Girar: OFF', 1);
+            }} else {{
+                tocarGiro();
+                atualizarLabelBotao(7, 'Girar: ON', 1);
+            }}
+        }}
+
+        function cancelarGiroPorInteracao() {{
+            if (girando) {{
+                pararGiro();
+                atualizarLabelBotao(7, 'Girar: OFF', 1);
+            }}
+        }}
+        gd.addEventListener('mousedown', cancelarGiroPorInteracao);
+        gd.addEventListener('touchstart', cancelarGiroPorInteracao);
+        gd.addEventListener('wheel', cancelarGiroPorInteracao);
 
         // menus tematicos (escolha entre opcoes: direcao do corte, cor,
         // tema) continuam com varios botoes -- roteados pela posicao do menu
         // (y), ja que ev.active vem 0/1/2 dentro do grupo. Os liga/desliga
-        // de verdade (Solido/Topografia/Pontos de Campo/Animação) agora sao
-        // menu de 1 botao so (ev.active sempre 0), tratado como alternancia.
+        // de verdade (Solido/Topografia/Pontos de Campo) sao menu de 1
+        // botao so (ev.active sempre 0), tratado como alternancia; Corte e
+        // Girar dividem a mesma linha (ev.active 0=Corte, 1=Girar).
         gd.on('plotly_buttonclicked', function(ev) {{
             if (typeof ev.active !== 'number' || !ev.menu) return;
             if (Math.abs(ev.menu.y - 0.98) < 0.001) {{
@@ -1095,11 +1155,12 @@ def main():
             }} else if (Math.abs(ev.menu.y - 0.38) < 0.001) {{
                 alternarPontosCampo();
             }} else if (Math.abs(ev.menu.y - 0.28) < 0.001) {{
-                alternarAnimacao();
+                if (ev.active === 0) {{ alternarAnimacao(); }} else {{ alternarGiro(); }}
             }}
         }});
 
         setTimeout(tocarAnimacaoCorte, 600);
+        setTimeout(tocarGiro, 400);
     }})();
     """
 
