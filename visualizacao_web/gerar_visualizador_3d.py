@@ -699,7 +699,7 @@ def main():
         gdf_campo = gpd.read_file(PONTOS_CAMPO_GPKG)
         cores_campo = [CORES_LITOLOGIA_CAMPO.get(lit, COR_LITOLOGIA_PADRAO) for lit in gdf_campo["litologia_padronizada"]]
         hover_campo = [
-            f"<b>{row.ponto_id}</b> ({row.id_original})<br>"
+            f"<b>{row.nome_itc}</b> ({row.ponto_id})<br>"
             f"Litologia: {row.litologia_padronizada}<br>"
             f"Tipo: {row.tipo_ponto}<br>"
             f"Qualidade: {row.qualidade_dado}<br>"
