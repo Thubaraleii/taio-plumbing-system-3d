@@ -77,7 +77,7 @@ RESOLUCAO_GRID_TOPO = 63  # pontos por eixo, so para o render (nao afeta o GemPy
 # pra 110 quando a ferramenta de corte (frames por posicao) fez o HTML passar de 400MB
 EXAGERO_Z = 6.0  # fator de exagero vertical (relevo real e sutil frente a area horizontal)
 BASE_Z_ABSOLUTA = -600.0  # piso do "cubao" -- mesma cota usada em ../scripts/06_gerar_solidos_estilizados_cubao.py
-COR_SILL, COR_DIQUE = "#A63D2F", "#1B4332"  # paleta exata (dique = verde escuro)
+COR_SILL, COR_DIQUE = "#49B18C", "#AFEC7C"  # paleta do mapa geologico (soleira teal, dique verde claro)
 ESPESSURA_SILL_ESTILIZADA = 400.0  # OBSOLETO (10/08/2026) -- o sill deixou de usar espessura fixa,
 # ver ESPESSURA_MINIMA_SILL/elevacao_serra_alta. Mantido só de referência histórica.
 ESPESSURA_MINIMA_SILL = 27.0  # espessura minima do sill (m) -- mediana real medida em campo (ver
@@ -118,7 +118,7 @@ J_MIN_CORTE = 12  # minimo de colunas/linhas mantidas (evita um bloco degenerado
 # (uso 350m -- bate com a regiao de Taio). Mesmos valores/cores do script
 # bpy do Blender (../blender/visualizacao_publico/scripts_bpy/montar_cena_teste.py).
 NOMES_CAMADAS = ["Teresina", "Serra Alta", "Irati", "Palermo", "Rio Bonito"]
-CORES_CAMADAS = ["#D6C79A", "#8C8C86", "#3E362C", "#B5AE93", "#C9A66B"]
+CORES_CAMADAS = ["#F8B6A0", "#FB8D74", "#C8625D", "#FF7757", "#E3644F"]  # paleta do mapa geologico (Teresina, Serra Alta, Irati, Palermo, Rio Bonito)
 PROFUNDIDADE_CAMADAS = [0.0, 350.0, 430.0, 485.0, 585.0, 854.0]
 
 # pontos de campo (catalogo unificado, ver PONTOS_CAMPO_GPKG) -- coloridos pela
@@ -163,7 +163,7 @@ def elevacao_serra_alta(x, y, elevacao_fn):
 # da area, coerente com fundo de vale). Mesmo limiar do script bpy do Blender.
 QUATERNARIO_LIMIAR_REAL = 450.0
 QUATERNARIO_ESPESSURA_REAL = 30.0
-COR_QUATERNARIO = "#D9CB82"
+COR_QUATERNARIO = "#FFFBC2"
 
 # paleta hipsometrica customizada (baixo -> alto), mesma de
 # ../scripts/04_exportar_topografia_para_blender.py
