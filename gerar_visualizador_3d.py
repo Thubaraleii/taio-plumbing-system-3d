@@ -778,11 +778,6 @@ def main():
         backgroundcolor=MARCA_NAVY, color=MARCA_CINZA_CLARO,
     )
     fig.update_layout(
-        title=dict(
-            text="<b>Modelo 3D Taió Plumbing System</b>",
-            font=dict(family=MARCA_FONTE, size=26, color=MARCA_CINZA_CLARO),
-            x=0.03, xanchor="left",
-        ),
         paper_bgcolor=MARCA_NAVY,
         font=dict(family=MARCA_FONTE, color=MARCA_CINZA_CLARO),
         scene=dict(
@@ -800,8 +795,7 @@ def main():
         ),
         legend=dict(x=0.02, y=0.98, bgcolor="rgba(45,10,74,0.75)", bordercolor=MARCA_ROXO, borderwidth=1,
                     font=dict(color=MARCA_CINZA_CLARO)),
-        margin=dict(l=0, r=0, t=90, b=80),
-        height=900,
+        margin=dict(l=0, r=0, t=10, b=80),
         updatemenus=[
             dict(
                 type="buttons", direction="left", showactive=False,
@@ -925,6 +919,9 @@ def main():
         ],
     )
 
+    for _m in fig.layout.updatemenus:
+        _m.visible = False
+
     eixos_js = ",\n        ".join(
         "{nome:'%s', prefixo:'%s', valores:[%s]}" % (
             modo, prefixo,
@@ -946,12 +943,12 @@ def main():
         document.head.appendChild(style);
         var logo = document.createElement('img');
         logo.src = 'data:image/jpeg;base64,{logo_b64}';
-        logo.style.cssText = 'position:fixed; top:14px; right:18px; width:64px; height:64px; ' +
+        logo.style.cssText = 'position:fixed; top:8px; right:12px; width:46px; height:46px; ' +
             'border-radius:50%; border:2px solid {MARCA_ROXO}; box-shadow:0 0 10px rgba(123,47,255,0.6); z-index:1000;';
         document.body.appendChild(logo);
         var atribuicao = document.createElement('div');
         atribuicao.textContent = 'Criado por Afonso Henrique de Jesus';
-        atribuicao.style.cssText = 'position:fixed; bottom:6px; left:14px; color:{MARCA_CINZA_CLARO}; ' +
+        atribuicao.style.cssText = 'position:fixed; bottom:6px; right:14px; color:{MARCA_CINZA_CLARO}; ' +
             'opacity:0.55; font-family:{MARCA_FONTE}; font-size:11px; z-index:1000;';
         document.body.appendChild(atribuicao);
     }})();
@@ -1091,6 +1088,10 @@ def main():
             Plotly.relayout(gd, patch);
             Plotly.restyle(gd, {{'colorbar.tickfont.color': t.texto, 'colorbar.title.font.color': t.texto}}, [0]);
             document.body.style.background = t.paper;
+            var raiz = document.documentElement.style, claro = nome === 'claro';
+            raiz.setProperty('--barra-bg', claro ? '#FFFFFF' : '{MARCA_ROXO_ESCURO}');
+            raiz.setProperty('--barra-txt', claro ? '{MARCA_NAVY}' : '{MARCA_CINZA_CLARO}');
+            raiz.setProperty('--barra-btn', claro ? '#EDE3FF' : '{MARCA_NAVY}');
         }}
 
         // animacao inicial de corte: varre o corte atual (eixo Leste-Oeste,
@@ -1191,6 +1192,7 @@ def main():
             if (girando) {{
                 pararGiro();
                 atualizarLabelBotao(7, 'Girar: OFF', 1);
+                sincronizarBarra();
             }}
         }}
         gd.addEventListener('mousedown', cancelarGiroPorInteracao);
@@ -1224,12 +1226,96 @@ def main():
             }}
         }});
 
-        setTimeout(tocarAnimacaoCorte, 600);
-        setTimeout(tocarGiro, 400);
+        // ---- barra superior (padrao dos demais produtos) ----
+        var estilo = document.createElement('style');
+        estilo.textContent =
+            ':root{{--barra-bg:{MARCA_ROXO_ESCURO};--barra-txt:{MARCA_CINZA_CLARO};--barra-btn:{MARCA_NAVY};--ac:{MARCA_ROXO}}}' +
+            '#barra-ferramentas{{display:flex;flex-wrap:wrap;gap:6px 14px;align-items:center;padding:8px 70px 8px 14px;' +
+            'background:var(--barra-bg);color:var(--barra-txt);border-bottom:2px solid var(--ac);font-family:{MARCA_FONTE};font-size:12px}}' +
+            '#barra-ferramentas h1{{font-size:15px;margin:0 8px 0 0}}#barra-ferramentas h1 b{{color:var(--ac)}}' +
+            '#barra-ferramentas .grupo{{display:flex;gap:5px;align-items:center}}' +
+            '#barra-ferramentas label{{opacity:.7;text-transform:uppercase;font-size:10px;letter-spacing:.06em}}' +
+            '#barra-ferramentas button,#barra-ferramentas select{{background:var(--barra-btn);color:var(--barra-txt);' +
+            'border:1px solid var(--ac);border-radius:5px;padding:4px 9px;font:inherit;cursor:pointer}}' +
+            '#barra-ferramentas button.ativo{{background:var(--ac);color:{MARCA_NAVY}}}';
+        document.head.appendChild(estilo);
+        var barra = document.createElement('div');
+        barra.id = 'barra-ferramentas';
+        function el(tag, props) {{ var e = document.createElement(tag); Object.assign(e, props || {{}}); return e; }}
+        function grupo(rotulo, itens) {{
+            var g = el('div', {{className: 'grupo'}});
+            g.appendChild(el('label', {{textContent: rotulo}}));
+            itens.forEach(function(i) {{ g.appendChild(i); }});
+            barra.appendChild(g); return g;
+        }}
+        function botao(texto, aoClicar) {{ var b = el('button', {{textContent: texto}}); b.onclick = aoClicar; return b; }}
+        barra.appendChild(el('h1', {{innerHTML: '<b>Modelo 3D</b> — Taió Plumbing System'}}));
+
+        var botoesEixo = ['Leste → Oeste', 'Oeste → Leste', 'Norte → Sul', 'Sul → Norte'].map(function(txt, i) {{
+            return botao(txt, function() {{ irParaEixo(i); sincronizarBarra(); }});
+        }});
+        var btnCorte = botao('Animar corte', function() {{ alternarAnimacao(); sincronizarBarra(); }});
+        grupo('Corte', botoesEixo.concat([btnCorte]));
+
+        var nomesCor = ['Hipsometria', 'Geologia', 'Satélite'];
+        var botoesCor = nomesCor.map(function(txt, i) {{
+            return botao(txt, function() {{
+                var a = gd.layout.updatemenus[3].buttons[i].args;
+                Plotly.restyle(gd, a[0], a[1]);
+                botoesCor.forEach(function(b, k) {{ b.classList.toggle('ativo', k === i); }});
+            }});
+        }});
+        botoesCor[0].classList.add('ativo');
+        grupo('Cor', botoesCor);
+
+        var btnSolido = botao('Sólido', function() {{ alternarSolido(); sincronizarBarra(); }});
+        var btnTopo = botao('Topografia', function() {{ alternarTopografia(); sincronizarBarra(); }});
+        var btnCampo = botao('Campo', function() {{ alternarPontosCampo(); sincronizarBarra(); }});
+        var btnGeoq = botao('Geoquímica', function() {{ alternarGeoquimica(); sincronizarBarra(); }});
+        grupo('Camadas', [btnTopo, btnSolido, btnCampo, btnGeoq]);
+
+        var selExag = el('select', {{title: 'Exagero vertical'}});
+        [['1', '1×'], ['3', '3×'], ['6', '6× (padrão)'], ['10', '10×']].forEach(function(o) {{
+            selExag.appendChild(el('option', {{value: o[0], textContent: o[1], selected: o[0] === '6'}}));
+        }});
+        var ASPECTO_BASE = JSON.parse(JSON.stringify(gd.layout.scene.aspectratio));
+        selExag.onchange = function() {{
+            Plotly.relayout(gd, {{'scene.aspectratio': {{x: ASPECTO_BASE.x, y: ASPECTO_BASE.y, z: ASPECTO_BASE.z * parseFloat(selExag.value) / 6}}}});
+        }};
+        var btnGiro = botao('Girar', function() {{ alternarGiro(); sincronizarBarra(); }});
+        grupo('Vista', [btnGiro, selExag]);
+
+        var btnEscuro = botao('Escuro', function() {{ aplicarTema('escuro'); btnEscuro.classList.add('ativo'); btnClaro.classList.remove('ativo'); }});
+        var btnClaro = botao('Claro', function() {{ aplicarTema('claro'); btnClaro.classList.add('ativo'); btnEscuro.classList.remove('ativo'); }});
+        btnEscuro.classList.add('ativo');
+        grupo('Tema', [btnEscuro, btnClaro]);
+
+        function sincronizarBarra() {{
+            botoesEixo.forEach(function(b, i) {{ b.classList.toggle('ativo', i === eixoAtual); }});
+            btnCorte.classList.toggle('ativo', animandoCorte);
+            btnGiro.classList.toggle('ativo', girando);
+            btnSolido.classList.toggle('ativo', solidoAtivo);
+            btnTopo.classList.toggle('ativo', topografiaAtiva);
+            btnCampo.classList.toggle('ativo', pontosCampoAtivos);
+            btnGeoq.classList.toggle('ativo', geoquimicaAtiva);
+        }}
+
+        gd.parentNode.insertBefore(barra, gd);
+        function ajustarTamanho() {{
+            gd.style.height = Math.max(400, window.innerHeight - barra.offsetHeight) + 'px';
+            Plotly.relayout(gd, {{height: Math.max(400, window.innerHeight - barra.offsetHeight), width: window.innerWidth}});
+        }}
+        window.addEventListener('resize', ajustarTamanho);
+        ajustarTamanho();
+
+        setTimeout(function() {{ tocarAnimacaoCorte(); sincronizarBarra(); }}, 600);
+        setTimeout(function() {{ tocarGiro(); sincronizarBarra(); }}, 400);
+        sincronizarBarra();
     }})();
     """
 
-    fig.write_html(str(OUT_HTML), include_plotlyjs="inline", full_html=True, post_script=post_script)
+    fig.write_html(str(OUT_HTML), include_plotlyjs="inline", full_html=True, post_script=post_script,
+                   default_height="100%", default_width="100%", config={"responsive": True, "displaylogo": False})
     favicon_tags = (
         '<link rel="icon" type="image/png" href="assets/favicon.png">'
         '<link rel="shortcut icon" href="assets/favicon.ico">'
