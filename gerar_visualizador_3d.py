@@ -534,6 +534,14 @@ def main():
     gdf_sill = gdf_lito[gdf_lito["formacao"] == "Soleira"]
     gdf_dique = gdf_lito[gdf_lito["formacao"] == "Dique"]
     print(f"sill: {len(gdf_sill)} lobos, dique: {len(gdf_dique)} corpos (poligonos atualizados, ver litologia_processada.shp)")
+
+    # "erase" do sedimentar pela soleira: dentro do poligono da soleira os contatos acima da base do corpo
+    # colapsam pra essa base -- as camadas deixam de existir ali e a soleira (terreno -> base, mesma base de
+    # construir_solido) ocupa o lugar, sem sobreposicao de superficies.
+    import shapely
+    m_sill = shapely.contains_xy(gdf_sill.geometry.union_all(), grid_x, grid_y)
+    base_sill_grid = np.minimum(grid_contatos[1], grid_z - ESPESSURA_MINIMA_SILL)
+    grid_contatos = [np.where(m_sill, np.minimum(c, base_sill_grid), c) for c in grid_contatos]
     elevacao_fn = montar_elevador(xyz)
     margem = 2000.0
     bbox_amplo = (xmin - margem, ymin - margem, xmax + margem, ymax + margem)
