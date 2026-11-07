@@ -751,6 +751,46 @@ def main():
             name="Geoquímica (Alto/Baixo-Ti)", showlegend=False, visible=False,
         ))
 
+    # falhas e fraturas: CPRM (SIG SC 1:500.000) em linhas drapeadas (falha azul, fratura rosa) + falhas de campo
+    # (pontos estruturais classificados como falha/fratura, pretos) -- traces fixas, toggle "Estruturas"
+    idx_estr = []
+    gpkg_regional = PONTOS_CAMPO_GPKG.parent.parent.parent / "dados_base" / "geologia_regional_sc.gpkg"
+    if gpkg_regional.exists():
+        est_cprm = gpd.read_file(gpkg_regional, layer="estrutura")
+        janela_est = box(xmin, ymin, xmax, ymax)
+        for categoria, cor, larg in (("Falha", "#2563EB", 6), ("Fratura", "#D81B73", 4)):
+            ex, ey, ez = [], [], []
+            for g in est_cprm.loc[est_cprm["categoria"] == categoria, "geometry"]:
+                inter = g.intersection(janela_est)
+                for seg in ([inter] if inter.geom_type == "LineString" else list(getattr(inter, "geoms", []))):
+                    if seg.geom_type != "LineString" or seg.length < 30:
+                        continue
+                    n_seg = max(int(seg.length // 120), 2)
+                    for d_seg in np.linspace(0, seg.length, n_seg):
+                        q = seg.interpolate(d_seg)
+                        ex.append(q.x); ey.append(q.y); ez.append(elevacao_fn(q.x, q.y) + 12)
+                    ex.append(None); ey.append(None); ez.append(None)
+            if ex:
+                idx_estr.append(len(fig.data))
+                fig.add_trace(go.Scatter3d(
+                    x=ex, y=ey, z=ez, mode="lines", line=dict(color=cor, width=larg),
+                    name=f"{categoria} (CPRM)", showlegend=False, visible=False, hoverinfo="name",
+                ))
+    pts_estr = PONTOS_CAMPO_GPKG.parent / "nuvem_pontos_direcoes.gpkg"
+    if pts_estr.exists():
+        gdf_estr = gpd.read_file(pts_estr)
+        gdf_estr = gdf_estr[gdf_estr["classificacao"].isin(["falha_ou_dique_ambiguo_relevo_negativo", "fratura_falha"])]
+        if len(gdf_estr):
+            idx_estr.append(len(fig.data))
+            fig.add_trace(go.Scatter3d(
+                x=gdf_estr.geometry.x, y=gdf_estr.geometry.y,
+                z=[elevacao_fn(x, y) + 15 for x, y in zip(gdf_estr.geometry.x, gdf_estr.geometry.y)],
+                mode="markers", marker=dict(size=5, symbol="x", color="#000000", line=dict(color="#FFFFFF", width=1)),
+                text=[f"<b>{r.ponto_id}</b><br>{r.classificacao}<br>Azimute: {r.azimute_ou_strike_deg:.0f}°" for r in gdf_estr.itertuples()],
+                hoverinfo="text", name="Falha de campo", showlegend=False, visible=False,
+            ))
+    print(f"estruturas 3D: {len(idx_estr)} traces")
+
     idx_geo_inicio = 1 + len(ORDEM_TRACES_RESTO) - len(CHAVES_GEO) - 1  # indice da 1a trace de decalque
     idx_satelite_trace = 1 + len(ORDEM_TRACES_RESTO) - 1  # ultimo item de ORDEM_TRACES_RESTO
 
@@ -960,6 +1000,7 @@ def main():
         var N_CORTE = {N_CORTE};
         var INDICE_PONTOS_CAMPO = {idx_pontos_campo};
         var INDICE_GEOQUIMICA = {idx_geoq};
+        var INDICES_ESTRUTURAS = {idx_estr};
         var EIXOS = [
         {eixos_js}
         ];
@@ -1039,6 +1080,12 @@ def main():
             pontosCampoAtivos = !pontosCampoAtivos;
             Plotly.restyle(gd, {{visible: pontosCampoAtivos}}, [INDICE_PONTOS_CAMPO]);
             atualizarLabelBotao(6, pontosCampoAtivos ? 'Pontos de Campo: ON' : 'Pontos de Campo: OFF');
+        }}
+
+        var estruturasAtivas = false;
+        function alternarEstruturas() {{
+            estruturasAtivas = !estruturasAtivas;
+            if (INDICES_ESTRUTURAS.length) Plotly.restyle(gd, {{visible: estruturasAtivas}}, INDICES_ESTRUTURAS);
         }}
 
         var geoquimicaAtiva = false;
@@ -1272,7 +1319,8 @@ def main():
         var btnTopo = botao('Topografia', function() {{ alternarTopografia(); sincronizarBarra(); }});
         var btnCampo = botao('Campo', function() {{ alternarPontosCampo(); sincronizarBarra(); }});
         var btnGeoq = botao('Geoquímica', function() {{ alternarGeoquimica(); sincronizarBarra(); }});
-        grupo('Camadas', [btnTopo, btnSolido, btnCampo, btnGeoq]);
+        var btnEstr = botao('Falhas/Fraturas', function() {{ alternarEstruturas(); sincronizarBarra(); }});
+        grupo('Camadas', [btnTopo, btnSolido, btnCampo, btnGeoq, btnEstr]);
 
         var selExag = el('select', {{title: 'Exagero vertical'}});
         [['1', '1×'], ['3', '3×'], ['6', '6× (padrão)'], ['10', '10×']].forEach(function(o) {{
@@ -1298,6 +1346,7 @@ def main():
             btnTopo.classList.toggle('ativo', topografiaAtiva);
             btnCampo.classList.toggle('ativo', pontosCampoAtivos);
             btnGeoq.classList.toggle('ativo', geoquimicaAtiva);
+            btnEstr.classList.toggle('ativo', estruturasAtivas);
         }}
 
         gd.parentNode.insertBefore(barra, gd);
