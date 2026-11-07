@@ -789,7 +789,43 @@ def main():
                 text=[f"<b>{r.ponto_id}</b><br>{r.classificacao}<br>Azimute: {r.azimute_ou_strike_deg:.0f}°" for r in gdf_estr.itertuples()],
                 hoverinfo="text", name="Falha de campo", showlegend=False, visible=False,
             ))
+    # linha de superficie (rumo) de cada falha de campo: segmento de 500 m ao longo do azimute/strike, drapeado
+    if pts_estr.exists() and len(gdf_estr):
+        lx, ly, lz = [], [], []
+        for r in gdf_estr.itertuples():
+            if r.azimute_ou_strike_deg != r.azimute_ou_strike_deg:
+                continue
+            ux, uy = np.sin(np.radians(r.azimute_ou_strike_deg)), np.cos(np.radians(r.azimute_ou_strike_deg))
+            for f in np.linspace(-250, 250, 6):
+                px, py = r.geometry.x + f * ux, r.geometry.y + f * uy
+                lx.append(px); ly.append(py); lz.append(elevacao_fn(px, py) + 12)
+            lx.append(None); ly.append(None); lz.append(None)
+        idx_estr.append(len(fig.data))
+        fig.add_trace(go.Scatter3d(x=lx, y=ly, z=lz, mode="lines", line=dict(color="#000000", width=5),
+                                   name="Falha de campo (rumo)", showlegend=False, visible=False, hoverinfo="name"))
     print(f"estruturas 3D: {len(idx_estr)} traces")
+
+    # lineamentos de superficie (satelite): positivo (verde) e negativo (laranja), mesmo padrao da secao/webmap
+    idx_lin = []
+    lin_gpkg = PONTOS_CAMPO_GPKG.parent.parent / "lineamentos_direcoes.gpkg"
+    if lin_gpkg.exists():
+        lin = gpd.read_file(lin_gpkg).to_crs(31982)
+        janela_lin = box(xmin, ymin, xmax, ymax)
+        for tipo, cor in (("Positivo", "#2E7D5B"), ("Negativo", "#E8A33D")):
+            ex, ey, ez = [], [], []
+            for g in lin.loc[lin["tipo"] == tipo, "geometry"]:
+                inter = g.intersection(janela_lin)
+                for seg in ([inter] if inter.geom_type == "LineString" else list(getattr(inter, "geoms", []))):
+                    if seg.geom_type != "LineString" or seg.length < 30:
+                        continue
+                    for d_seg in np.linspace(0, seg.length, max(int(seg.length // 120), 2)):
+                        q = seg.interpolate(d_seg)
+                        ex.append(q.x); ey.append(q.y); ez.append(elevacao_fn(q.x, q.y) + 10)
+                    ex.append(None); ey.append(None); ez.append(None)
+            if ex:
+                idx_lin.append(len(fig.data))
+                fig.add_trace(go.Scatter3d(x=ex, y=ey, z=ez, mode="lines", line=dict(color=cor, width=5),
+                                           name=f"Lineamento {tipo.lower()}", showlegend=False, visible=False, hoverinfo="name"))
 
     idx_geo_inicio = 1 + len(ORDEM_TRACES_RESTO) - len(CHAVES_GEO) - 1  # indice da 1a trace de decalque
     idx_satelite_trace = 1 + len(ORDEM_TRACES_RESTO) - 1  # ultimo item de ORDEM_TRACES_RESTO
@@ -1001,6 +1037,7 @@ def main():
         var INDICE_PONTOS_CAMPO = {idx_pontos_campo};
         var INDICE_GEOQUIMICA = {idx_geoq};
         var INDICES_ESTRUTURAS = {idx_estr};
+        var INDICES_LINEAMENTOS = {idx_lin};
         var EIXOS = [
         {eixos_js}
         ];
@@ -1080,6 +1117,12 @@ def main():
             pontosCampoAtivos = !pontosCampoAtivos;
             Plotly.restyle(gd, {{visible: pontosCampoAtivos}}, [INDICE_PONTOS_CAMPO]);
             atualizarLabelBotao(6, pontosCampoAtivos ? 'Pontos de Campo: ON' : 'Pontos de Campo: OFF');
+        }}
+
+        var lineamentosAtivos = false;
+        function alternarLineamentos() {{
+            lineamentosAtivos = !lineamentosAtivos;
+            if (INDICES_LINEAMENTOS.length) Plotly.restyle(gd, {{visible: lineamentosAtivos}}, INDICES_LINEAMENTOS);
         }}
 
         var estruturasAtivas = false;
@@ -1320,7 +1363,8 @@ def main():
         var btnCampo = botao('Campo', function() {{ alternarPontosCampo(); sincronizarBarra(); }});
         var btnGeoq = botao('Geoquímica', function() {{ alternarGeoquimica(); sincronizarBarra(); }});
         var btnEstr = botao('Falhas/Fraturas', function() {{ alternarEstruturas(); sincronizarBarra(); }});
-        grupo('Camadas', [btnTopo, btnSolido, btnCampo, btnGeoq, btnEstr]);
+        var btnLin = botao('Lineamentos', function() {{ alternarLineamentos(); sincronizarBarra(); }});
+        grupo('Camadas', [btnTopo, btnSolido, btnCampo, btnGeoq, btnEstr, btnLin]);
 
         var selExag = el('select', {{title: 'Exagero vertical'}});
         [['1', '1×'], ['3', '3×'], ['6', '6× (padrão)'], ['10', '10×']].forEach(function(o) {{
@@ -1347,6 +1391,7 @@ def main():
             btnCampo.classList.toggle('ativo', pontosCampoAtivos);
             btnGeoq.classList.toggle('ativo', geoquimicaAtiva);
             btnEstr.classList.toggle('ativo', estruturasAtivas);
+            btnLin.classList.toggle('ativo', lineamentosAtivos);
         }}
 
         gd.parentNode.insertBefore(barra, gd);
