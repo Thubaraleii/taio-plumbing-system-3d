@@ -33,7 +33,7 @@ ESTRUTURAL_GPKG = BANCO / "Unificação" / "GPKG_Novos" / "nuvem_pontos_direcoes
 POCOS_GPKG = BANCO / "Unificação" / "pocos_regionais.gpkg"
 OUT_HTML = AQUI / "viewer_3d_taio.html"
 
-N_GRADE = 300          # vertices no eixo maior do relevo (~110 m)
+N_GRADE = 460          # vertices no eixo maior do relevo (~75 m)
 RES_RASTER_M = 25.0    # raster geologico usado nas faces de corte
 BASE_DIQUE_Z = -350.0
 OFFSET_DEC = {"Depósito quaternário": 4.0, "Soleira": 5.0, "Dique": 6.0}  # decalques em camadas (corpos por cima)
@@ -304,13 +304,12 @@ def main():
 </style></head><body>
 <img id="logo" src="data:image/{mime};base64,{logo}">
 <div id="barra"><h1><b>Modelo 3D</b> — Taió Plumbing System</h1>
- <div class="grupo"><label>Corte</label><button class="cz" data-e="x" data-i="0">Leste → Oeste</button><button class="cz" data-e="x" data-i="1">Oeste → Leste</button><button class="cz" data-e="y" data-i="0">Norte → Sul</button><button class="cz" data-e="y" data-i="1">Sul → Norte</button><button class="cz" data-e="">Sem corte</button><button id="anim">Animar corte</button>
+ <div class="grupo"><label>Corte</label><button class="cz" data-e="x" data-i="0">Leste → Oeste</button><button class="cz" data-e="x" data-i="1">Oeste → Leste</button><button class="cz" data-e="y" data-i="0">Norte → Sul</button><button class="cz" data-e="y" data-i="1">Sul → Norte</button><button class="cz" data-e="">Sem corte</button>
   <input type="range" id="cpos" min="4" max="100" value="100" style="width:110px"></div>
- <div class="grupo"><label>Cor</label><button class="tex ativo" data-t="tex_hipsometria">Hipsometria</button><button class="tex" data-t="tex_geologia">Geologia</button><button class="tex" data-t="tex_satelite">Satélite</button>
-  <label>Opacidade</label><input type="range" id="op" min="30" max="100" value="100" style="width:80px"></div>
+ <div class="grupo"><label>Cor</label><button class="tex ativo" data-t="tex_hipsometria">Hipsometria</button><button class="tex" data-t="tex_geologia">Geologia</button><button class="tex" data-t="tex_satelite">Satélite</button></div>
  <div class="grupo"><label>Camadas</label><button class="cam ativo" data-m="terreno">Topografia</button><button class="cam" data-m="campo">Campo</button><button class="cam" data-m="geoq">Geoquímica</button><button class="cam" data-m="pocos">Poços</button></div>
  <div class="grupo"><label>Estruturas</label><button class="cam" data-m="est_falha">Falha CPRM</button><button class="cam" data-m="est_fratura">Fratura CPRM</button><button class="cam" data-m="est_campo">Falha de campo</button><button class="cam" data-m="lin_pos">Lineam. (+)</button><button class="cam" data-m="lin_neg">Lineam. (−)</button></div>
- <div class="grupo"><label>Vista</label><button id="giro">Girar</button><select id="exag"><option value="1">1×</option><option value="3">3×</option><option value="6" selected>6× (padrão)</option><option value="10">10×</option></select></div>
+ <div class="grupo"><label>Vista</label><select id="exag"><option value="1">1×</option><option value="3">3×</option><option value="6" selected>6× (padrão)</option><option value="10">10×</option></select></div>
  <div class="grupo"><label>Tema</label><button class="tema ativo" data-t="escuro">Escuro</button><button class="tema" data-t="claro">Claro</button></div>
  <div id="info">{info}</div></div>
 <div id="plot"></div>
@@ -318,9 +317,9 @@ def main():
 <script>
 var FIG = {fig.to_json()}, CAP = {json.dumps(cap)};
 var gd = document.getElementById('plot');
-var textura = 'tex_hipsometria', EXAG = {EXAGERO_PADRAO}, OP = 1, camadasOn = {{terreno: true, campo: false, geoq: false, pocos: false,
+var textura = 'tex_hipsometria', EXAG = {EXAGERO_PADRAO}, camadasOn = {{terreno: true, campo: false, geoq: false, pocos: false,
   est_falha: false, est_fratura: false, est_campo: false, lin_pos: false, lin_neg: false}};
-var CORTE = {{eixo: 'x', inv: false, frac: 1}}, CORES = {{}}, anim = null, giroT = null, ang = Math.atan2(-1.45, -1.25), RAIO = Math.sqrt(1.25 * 1.25 + 1.45 * 1.45);
+var CORTE = {{eixo: '', inv: false, frac: 1}}, CORES = {{}};
 function altura() {{ return window.innerHeight - document.getElementById('barra').offsetHeight; }}
 function b64u8(s) {{ var b = atob(s), a = new Uint8Array(b.length); for (var i = 0; i < b.length; i++) a[i] = b.charCodeAt(i); return a; }}
 CAP.rast = b64u8(CAP.raster);
@@ -370,13 +369,98 @@ function montarCaps(eixo, pos) {{
 }}
 var capIdx = []; FIG.data.forEach(function(t, n) {{ if (t.meta && t.meta.indexOf('cap_') === 0) capIdx[parseInt(t.meta.slice(4), 10)] = n; }});
 var idxTerreno = FIG.data.findIndex(function(t) {{ return t.meta === 'terreno'; }});
-function aplicarCorte() {{
-  var s = FIG.layout.scene, patch = {{'scene.xaxis.range': s.xaxis.range, 'scene.yaxis.range': s.yaxis.range}};
-  if (!CORTE.eixo || CORTE.frac >= 0.99) {{ Plotly.restyle(gd, {{visible: false}}, capIdx); Plotly.relayout(gd, patch); return; }}
+
+function dec(a) {{
+  if (a && a.bdata) {{
+    var T = {{i1: Int8Array, u1: Uint8Array, i2: Int16Array, u2: Uint16Array, i4: Int32Array, u4: Uint32Array, f4: Float32Array, f8: Float64Array}}[a.dtype];
+    var b = atob(a.bdata), u = new Uint8Array(b.length); for (var q = 0; q < b.length; q++) u[q] = b.charCodeAt(q);
+    return new T(u.buffer);
+  }}
+  return a;
+}}
+// recorte de malha por plano (x=pos ou y=pos): triangulos inteiros ficam, os cortados sao refeitos no plano -- a caixa NAO muda (corpo estatico)
+function clipMesh(o, ax, pos, menor, vc) {{
+  var P = ax === 'x' ? o.x : o.y, n = o.x.length, map = new Int32Array(n).fill(-1);
+  var X = [], Y = [], Z = [], C = vc ? [] : null, I = [], J = [], K = [];
+  function dentro(v) {{ return menor ? P[v] <= pos : P[v] >= pos; }}
+  function add(v) {{ var m = map[v]; if (m < 0) {{ m = map[v] = X.length; X.push(o.x[v]); Y.push(o.y[v]); Z.push(o.z[v]); if (C) C.push(vc[v]); }} return m; }}
+  function inter(a, b) {{
+    var t = (pos - P[a]) / (P[b] - P[a]), m = X.length;
+    X.push(o.x[a] + t * (o.x[b] - o.x[a])); Y.push(o.y[a] + t * (o.y[b] - o.y[a])); Z.push(o.z[a] + t * (o.z[b] - o.z[a]));
+    if (C) C.push([vc[a][0] + t * (vc[b][0] - vc[a][0]), vc[a][1] + t * (vc[b][1] - vc[a][1]), vc[a][2] + t * (vc[b][2] - vc[a][2])]);
+    return m;
+  }}
+  for (var q = 0, nt = o.i.length; q < nt; q++) {{
+    var a = o.i[q], b = o.j[q], c = o.k[q], da = dentro(a), db = dentro(b), dc = dentro(c), s = da + db + dc;
+    if (s === 3) {{ I.push(add(a)); J.push(add(b)); K.push(add(c)); }}
+    else if (s > 0) {{
+      var vs = [a, b, c], ds = [da, db, dc], poly = [];
+      for (var e = 0; e < 3; e++) {{
+        var p = vs[e], r = vs[(e + 1) % 3];
+        if (ds[e]) poly.push(add(p));
+        if (ds[e] !== ds[(e + 1) % 3]) poly.push(inter(p, r));
+      }}
+      for (var f = 1; f + 1 < poly.length; f++) {{ I.push(poly[0]); J.push(poly[f]); K.push(poly[f + 1]); }}
+    }}
+  }}
+  if (!I.length) return {{x: [0, 0, 0], y: [0, 0, 0], z: [0, 0, 0], i: [0], j: [1], k: [2], vc: C ? [[0, 0, 0], [0, 0, 0], [0, 0, 0]] : null}};
+  return {{x: X, y: Y, z: Z, i: I, j: J, k: K, vc: C}};
+}}
+function clipScat(o, ax, pos, menor) {{
+  var P = ax === 'x' ? o.x : o.y, X = [], Y = [], Z = [];
+  for (var q = 0, n = P.length; q < n; q++) {{
+    var v = P[q], ok = v === null || (menor ? v <= pos : v >= pos);
+    X.push(ok ? o.x[q] : null); Y.push(ok ? o.y[q] : null); Z.push(ok ? o.z[q] : null);
+  }}
+  return {{x: X, y: Y, z: Z}};
+}}
+// guarda os dados originais das malhas/linhas/pontos recortaveis
+function guardarOrig(fig) {{
+  var orig = {{}}, malhas = [], cenas = [];
+  fig.data.forEach(function(t, n) {{
+    if (t.type === 'mesh3d' && !(t.meta && t.meta.indexOf('cap_') === 0)) {{
+      orig[n] = {{x: dec(t.x), y: dec(t.y), z: dec(t.z), i: dec(t.i), j: dec(t.j), k: dec(t.k)}}; malhas.push(n);
+    }} else if (t.type === 'scatter3d' && t.meta && t.meta !== 'norte') {{
+      orig[n] = {{x: dec(t.x), y: dec(t.y), z: dec(t.z)}}; cenas.push(n);
+    }}
+  }});
+  return {{orig: orig, malhas: malhas, cenas: cenas, clipado: false}};
+}}
+// aplica (ou desfaz) o recorte numa figura; corpoCor = cores atuais do relevo (nested rgb)
+function recortar(gd, est, idxTerreno, corpoCor, eixo, pos, menor) {{
+  var rest = function(upd, idx) {{ if (idx.length) Plotly.restyle(gd, upd, idx); }};
+  var corta = !!eixo;
+  var outras = est.malhas.filter(function(n) {{ return n !== idxTerreno; }});
+  var T = est.orig[idxTerreno];
+  if (!corta) {{
+    if (!est.clipado) return;
+    Plotly.restyle(gd, {{x: [T.x], y: [T.y], z: [T.z], i: [T.i], j: [T.j], k: [T.k], vertexcolor: [corpoCor]}}, [idxTerreno]);
+    var o = est.orig;
+    rest({{x: outras.map(function(n) {{ return o[n].x; }}), y: outras.map(function(n) {{ return o[n].y; }}), z: outras.map(function(n) {{ return o[n].z; }}),
+          i: outras.map(function(n) {{ return o[n].i; }}), j: outras.map(function(n) {{ return o[n].j; }}), k: outras.map(function(n) {{ return o[n].k; }})}}, outras);
+    rest({{x: est.cenas.map(function(n) {{ return o[n].x; }}), y: est.cenas.map(function(n) {{ return o[n].y; }}), z: est.cenas.map(function(n) {{ return o[n].z; }})}}, est.cenas);
+    est.clipado = false; return;
+  }}
+  var rt = clipMesh(T, eixo, pos, menor, corpoCor);
+  Plotly.restyle(gd, {{x: [rt.x], y: [rt.y], z: [rt.z], i: [rt.i], j: [rt.j], k: [rt.k], vertexcolor: [rt.vc]}}, [idxTerreno]);
+  var cm = outras.map(function(n) {{ return clipMesh(est.orig[n], eixo, pos, menor, null); }});
+  rest({{x: cm.map(function(r) {{ return r.x; }}), y: cm.map(function(r) {{ return r.y; }}), z: cm.map(function(r) {{ return r.z; }}),
+        i: cm.map(function(r) {{ return r.i; }}), j: cm.map(function(r) {{ return r.j; }}), k: cm.map(function(r) {{ return r.k; }})}}, outras);
+  var cs = est.cenas.map(function(n) {{ return clipScat(est.orig[n], eixo, pos, menor); }});
+  rest({{x: cs.map(function(r) {{ return r.x; }}), y: cs.map(function(r) {{ return r.y; }}), z: cs.map(function(r) {{ return r.z; }})}}, est.cenas);
+  est.clipado = true;
+}}
+var EST = guardarOrig(FIG), pendente = false;
+function aplicarCorte() {{ if (pendente) return; pendente = true; setTimeout(function() {{ pendente = false; executarCorte(); }}, 0); }}
+function executarCorte() {{
+  var corpoCor = coresTerreno(textura === 'tex_satelite' ? 'sat' : 'hip');
+  if (!CORTE.eixo || CORTE.frac >= 0.99) {{
+    recortar(gd, EST, idxTerreno, corpoCor, '', 0, true);
+    Plotly.restyle(gd, {{visible: false}}, capIdx); return;
+  }}
   var eixo = CORTE.eixo, a0 = eixo === 'x' ? CAP.x0 : CAP.y0, a1 = eixo === 'x' ? CAP.x1 : CAP.y1;
-  var pos = CORTE.inv ? a1 - CORTE.frac * (a1 - a0) : a0 + CORTE.frac * (a1 - a0), base = eixo === 'x' ? s.xaxis.range : s.yaxis.range;
-  patch['scene.' + eixo + 'axis.range'] = CORTE.inv ? [pos - 0.5, base[1]] : [base[0], pos + 0.5];
-  Plotly.relayout(gd, patch);
+  var pos = CORTE.inv ? a1 - CORTE.frac * (a1 - a0) : a0 + CORTE.frac * (a1 - a0);
+  recortar(gd, EST, idxTerreno, corpoCor, eixo, pos, !CORTE.inv);
   montarCaps(eixo, pos).forEach(function(m, u) {{
     Plotly.restyle(gd, {{x: [m.x], y: [m.y], z: [m.z], i: [m.i], j: [m.j], k: [m.k], visible: true}}, [capIdx[u]]);
   }});
@@ -391,52 +475,28 @@ function aplicar() {{
     return true;
   }});
   Plotly.restyle(gd, {{visible: vis}});
-  Plotly.restyle(gd, {{vertexcolor: [coresTerreno(textura === 'tex_satelite' ? 'sat' : 'hip')]}}, [idxTerreno]);
-  var ids = []; FIG.data.forEach(function(t, n) {{ if (t.meta === 'terreno' || t.meta === 'geo') ids.push(n); }});
-  Plotly.restyle(gd, {{opacity: OP}}, ids);
+  if (!EST.clipado) Plotly.restyle(gd, {{vertexcolor: [coresTerreno(textura === 'tex_satelite' ? 'sat' : 'hip')]}}, [idxTerreno]);
   var ar = FIG.layout.scene.aspectratio;
   Plotly.relayout(gd, {{'scene.aspectratio': {{x: ar.x, y: ar.y, z: ar.z * EXAG / 3}}}});
   aplicarCorte();
 }}
 gd.style.height = altura() + 'px';
-Plotly.newPlot(gd, FIG.data, FIG.layout, {{responsive: true, displaylogo: false}}).then(function() {{ aplicar(); iniciarAnimacoes(); }});
+Plotly.newPlot(gd, FIG.data, FIG.layout, {{responsive: true, displaylogo: false}}).then(function() {{ aplicar(); marcarCorte(); }});
 function marcarCorte() {{
   document.querySelectorAll('.cz').forEach(function(b) {{
     b.classList.toggle('ativo', b.dataset.e === CORTE.eixo && (b.dataset.e === '' || (b.dataset.i === '1') === CORTE.inv));
   }});
 }}
-function pararAnim() {{ if (anim) {{ clearInterval(anim); anim = null; }} document.getElementById('anim').classList.remove('ativo'); }}
-function tocarAnim() {{
-  pararAnim(); document.getElementById('anim').classList.add('ativo');
-  var dir = -1; if (!CORTE.eixo) {{ CORTE.eixo = 'x'; CORTE.inv = false; }}
-  anim = setInterval(function() {{
-    CORTE.frac += dir * 0.04; if (CORTE.frac <= 0.1) {{ CORTE.frac = 0.1; dir = 1; }} if (CORTE.frac >= 1) {{ CORTE.frac = 1; dir = -1; }}
-    document.getElementById('cpos').value = Math.round(CORTE.frac * 100); marcarCorte(); aplicarCorte();
-  }}, 220);
-}}
-function pararGiro() {{ if (giroT) {{ clearInterval(giroT); giroT = null; }} document.getElementById('giro').classList.remove('ativo'); }}
-function tocarGiro() {{
-  pararGiro(); document.getElementById('giro').classList.add('ativo');
-  giroT = setInterval(function() {{
-    ang = (ang + 2 * Math.PI / 90) % (2 * Math.PI);
-    Plotly.relayout(gd, {{'scene.camera.eye': {{x: RAIO * Math.cos(ang), y: RAIO * Math.sin(ang), z: 0.95}}}});
-  }}, 80);
-}}
-function iniciarAnimacoes() {{ marcarCorte(); setTimeout(tocarAnim, 500); setTimeout(tocarGiro, 300); }}
 document.querySelectorAll('.cz').forEach(function(b) {{ b.onclick = function() {{
-  pararAnim(); CORTE.eixo = b.dataset.e; CORTE.inv = b.dataset.i === '1';
+  CORTE.eixo = b.dataset.e; CORTE.inv = b.dataset.i === '1';
   if (CORTE.eixo && CORTE.frac >= 0.99) {{ CORTE.frac = 0.5; document.getElementById('cpos').value = 50; }}
   marcarCorte(); aplicarCorte(); }}; }});
-document.getElementById('cpos').oninput = function() {{ pararAnim(); CORTE.frac = parseFloat(this.value) / 100; if (!CORTE.eixo) CORTE.eixo = 'x'; marcarCorte(); aplicarCorte(); }};
-document.getElementById('anim').onclick = function() {{ if (anim) {{ pararAnim(); CORTE.frac = 1; document.getElementById('cpos').value = 100; aplicarCorte(); }} else tocarAnim(); }};
-document.getElementById('giro').onclick = function() {{ if (giroT) pararGiro(); else tocarGiro(); }};
-['mousedown', 'touchstart', 'wheel'].forEach(function(ev) {{ gd.addEventListener(ev, pararGiro); }});
+document.getElementById('cpos').oninput = function() {{ CORTE.frac = parseFloat(this.value) / 100; if (!CORTE.eixo) CORTE.eixo = 'x'; marcarCorte(); aplicarCorte(); }};
 document.querySelectorAll('.tex').forEach(function(b) {{ b.onclick = function() {{ textura = b.dataset.t;
   document.querySelectorAll('.tex').forEach(function(x) {{ x.classList.toggle('ativo', x === b); }}); aplicar(); }}; }});
 document.querySelectorAll('.cam').forEach(function(b) {{ b.onclick = function() {{ camadasOn[b.dataset.m] = !camadasOn[b.dataset.m];
   b.classList.toggle('ativo', camadasOn[b.dataset.m]); aplicar(); }}; }});
 document.querySelectorAll('.cam').forEach(function(b) {{ b.classList.toggle('ativo', !!camadasOn[b.dataset.m]); }});
-document.getElementById('op').oninput = function() {{ OP = parseFloat(this.value) / 100; aplicar(); }};
 document.getElementById('exag').onchange = function() {{ EXAG = parseFloat(this.value); aplicar(); }};
 var TEMA = {{
   escuro: {{paper: '{v.MARCA_NAVY}', cena: '#0C2945', grid: '#2A4663', txt: '{v.MARCA_CINZA_CLARO}', painel: '{v.MARCA_ROXO_ESCURO}', btn: '{v.MARCA_NAVY}', leg: 'rgba(12,41,69,0.8)'}},
