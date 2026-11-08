@@ -182,10 +182,11 @@ COLORSCALE_HIPSOMETRICO = [[i / (len(CORES_HIPSOMETRICAS) - 1), cor] for i, cor 
 ORDEM_FORMACOES = NOMES_CAMADAS + ["Depósito quaternário", "Soleira", "Dique"]
 CORES_FORMACOES = CORES_CAMADAS + [COR_QUATERNARIO, COR_SILL, COR_DIQUE]
 CORES_FORMACOES_MAPA = dict(zip(ORDEM_FORMACOES, CORES_FORMACOES))
-OFFSET_DECAL_Z = 6.0  # decalque um pouco acima do terreno, evita z-fighting
+OFFSET_DECAL_Z = 1.5  # decalque colado no terreno (1,5 m) -- so evita z-fighting
 NOS_GRADE = None  # nos (x,y) da malha renderizada -- definido em main()
 # decalques em camadas (corpos intrusivos por cima do sedimentar): evita z-fighting onde poligonos se sobrepoem
-OFFSETS_DECAL = {"Soleira": 10.0, "Dique": 12.0, "Depósito quaternário": 8.0}
+OFFSETS_DECAL = {"Depósito quaternário": 2.5, "Soleira": 3.5, "Dique": 4.5}
+OFFSET_SOLIDO_Z = 2.0  # topo dos solidos (soleira/dique) um pouco acima da superficie (z-fighting no modo hipsometria)
 
 N_CAMADAS = len(PROFUNDIDADE_CAMADAS) - 1
 CHAVES_GEO = [f"geo_{nome}" for nome in ORDEM_FORMACOES]
@@ -343,7 +344,7 @@ def construir_solido(poligono, elevacao_fn, espessura=None, base_absoluta=None, 
         return vazio, np.zeros((0, 3), dtype=int)
     n = len(pontos_xy)
 
-    z_topo = np.array([elevacao_fn(x, y) for x, y in pontos_xy])
+    z_topo = np.array([elevacao_fn(x, y) for x, y in pontos_xy]) + OFFSET_SOLIDO_Z
     if base_fn is not None:
         z_geologica = np.array([base_fn(x, y) for x, y in pontos_xy])
         piso_minimo = z_topo - (espessura_minima or 0.0)
@@ -1374,6 +1375,9 @@ def main():
             return botao(txt, function() {{
                 var a = gd.layout.updatemenus[3].buttons[i].args;
                 Plotly.restyle(gd, a[0], a[1]);
+                // quaternario heuristico (mascara por cota) so nos modos hipsometria/satelite; na geologia vale o poligono vetorial
+                var iq = []; gd.data.forEach(function(tr, k) {{ if (tr.type === 'surface' && /^Dep/.test(tr.name || '')) iq.push(k); }});
+                if (iq.length) Plotly.restyle(gd, {{visible: i !== 1}}, iq);
                 botoesCor.forEach(function(b, k) {{ b.classList.toggle('ativo', k === i); }});
             }});
         }});
