@@ -772,18 +772,9 @@ def main():
     if pts_estr.exists():
         gdf_estr = gpd.read_file(pts_estr)
         gdf_estr = gdf_estr[gdf_estr["classificacao"].isin(["falha_ou_dique_ambiguo_relevo_negativo", "fratura_falha"])]
-        if len(gdf_estr):
-            idx_estr.append(len(fig.data))
-            fig.add_trace(go.Scatter3d(
-                x=gdf_estr.geometry.x, y=gdf_estr.geometry.y,
-                z=[elevacao_fn(x, y) + 15 for x, y in zip(gdf_estr.geometry.x, gdf_estr.geometry.y)],
-                mode="markers", marker=dict(size=5, symbol="x", color="#000000", line=dict(color="#FFFFFF", width=1)),
-                text=[f"<b>{r.ponto_id}</b><br>{r.classificacao}<br>Azimute: {r.azimute_ou_strike_deg:.0f}°" for r in gdf_estr.itertuples()],
-                hoverinfo="text", name="Falha de campo", showlegend=False, visible=False,
-            ))
     # linha de superficie (rumo) de cada falha de campo: segmento de 500 m ao longo do azimute/strike, drapeado
     if pts_estr.exists() and len(gdf_estr):
-        lx, ly, lz = [], [], []
+        lx, ly, lz, lt = [], [], [], []
         for r in gdf_estr.itertuples():
             if r.azimute_ou_strike_deg != r.azimute_ou_strike_deg:
                 continue
@@ -791,10 +782,11 @@ def main():
             for f in np.linspace(-250, 250, 6):
                 px, py = r.geometry.x + f * ux, r.geometry.y + f * uy
                 lx.append(px); ly.append(py); lz.append(elevacao_fn(px, py) + 12)
-            lx.append(None); ly.append(None); lz.append(None)
+                lt.append(f"<b>{r.ponto_id}</b><br>{r.classificacao}<br>Azimute: {r.azimute_ou_strike_deg:.0f}°")
+            lx.append(None); ly.append(None); lz.append(None); lt.append(None)
         idx_estr.append(len(fig.data))
         fig.add_trace(go.Scatter3d(x=lx, y=ly, z=lz, mode="lines", line=dict(color="#000000", width=5),
-                                   name="Falha de campo (rumo)", showlegend=False, visible=False, hoverinfo="name"))
+                                   text=lt, name="Falha de campo", showlegend=False, visible=False, hoverinfo="text"))
     print(f"estruturas 3D: {len(idx_estr)} traces")
 
     # lineamentos de superficie (satelite): positivo (verde) e negativo (laranja), mesmo padrao da secao/webmap
