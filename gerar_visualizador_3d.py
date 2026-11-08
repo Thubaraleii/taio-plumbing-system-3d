@@ -1419,7 +1419,7 @@ def main():
         '<link rel="apple-touch-icon" href="assets/apple-touch-icon.png">'
     )
     html_txt = OUT_HTML.read_text(encoding="utf-8")
-    html_txt = html_txt.replace('<head><meta charset="utf-8" /></head>', f'<head><meta charset="utf-8" />{favicon_tags}</head>', 1)
+    html_txt = html_txt.replace('<head><meta charset="utf-8" /></head>', f'<head><meta charset="utf-8" />{favicon_tags}<title>Modelo 3D — Taió Plumbing System</title></head>', 1)
     OUT_HTML.write_text(html_txt, encoding="utf-8")
     print(f"\nSalvo em: {OUT_HTML}")
 
