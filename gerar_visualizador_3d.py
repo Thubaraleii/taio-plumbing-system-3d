@@ -74,7 +74,7 @@ RESOLUCAO_GRID_TOPO = 63  # pontos por eixo, so para o render (nao afeta o GemPy
 # decalques), entao 4 modos x N_CORTE posicoes multiplica o arquivo rapido; sem baixar a
 # resolucao/densidade dos decalques o HTML passava de 100MB (limite do GitHub sem LFS).
 # pra 110 quando a ferramenta de corte (frames por posicao) fez o HTML passar de 400MB
-EXAGERO_Z = 6.0  # fator de exagero vertical (relevo real e sutil frente a area horizontal)
+EXAGERO_Z = 3.0  # fator de exagero vertical (relevo real e sutil frente a area horizontal)
 BASE_Z_ABSOLUTA = -600.0  # piso do "cubao" -- mesma cota usada em ../scripts/06_gerar_solidos_estilizados_cubao.py
 COR_SILL, COR_DIQUE = "#49B18C", "#AFEC7C"  # paleta do mapa geologico (soleira teal, dique verde claro)
 ESPESSURA_MINIMA_SILL = 27.0  # espessura minima do sill (m) -- mediana real medida em campo (ver
@@ -159,7 +159,7 @@ def elevacao_serra_alta(x, y, elevacao_fn):
 # proxy -- so aparece onde o relevo fica abaixo do limiar (~10% mais baixo
 # da area, coerente com fundo de vale). Mesmo limiar do script bpy do Blender.
 QUATERNARIO_LIMIAR_REAL = 450.0
-QUATERNARIO_ESPESSURA_REAL = 10.0  # espessura so de render (a secao 2D usa 30 m): com exagero vertical 6x os degraus da mascara ficavam altos demais
+QUATERNARIO_ESPESSURA_REAL = 30.0
 COR_QUATERNARIO = "#FFFBC2"
 
 # paleta hipsometrica customizada (baixo -> alto), mesma de
@@ -182,11 +182,7 @@ COLORSCALE_HIPSOMETRICO = [[i / (len(CORES_HIPSOMETRICAS) - 1), cor] for i, cor 
 ORDEM_FORMACOES = NOMES_CAMADAS + ["Depósito quaternário", "Soleira", "Dique"]
 CORES_FORMACOES = CORES_CAMADAS + [COR_QUATERNARIO, COR_SILL, COR_DIQUE]
 CORES_FORMACOES_MAPA = dict(zip(ORDEM_FORMACOES, CORES_FORMACOES))
-OFFSET_DECAL_Z = 1.5  # decalque colado no terreno (1,5 m) -- so evita z-fighting
-NOS_GRADE = None  # nos (x,y) da malha renderizada -- definido em main()
-# decalques em camadas (corpos intrusivos por cima do sedimentar): evita z-fighting onde poligonos se sobrepoem
-OFFSETS_DECAL = {"Depósito quaternário": 2.5, "Soleira": 3.5, "Dique": 4.5}
-OFFSET_SOLIDO_Z = 2.0  # topo dos solidos (soleira/dique) um pouco acima da superficie (z-fighting no modo hipsometria)
+OFFSET_DECAL_Z = 3.0  # decalque um pouco acima do terreno, evita z-fighting
 
 N_CAMADAS = len(PROFUNDIDADE_CAMADAS) - 1
 CHAVES_GEO = [f"geo_{nome}" for nome in ORDEM_FORMACOES]
@@ -291,7 +287,7 @@ def densificar_contorno(poligono, passo: float):
     return [linha.interpolate(d).coords[0][:2] for d in np.linspace(0, comprimento, n, endpoint=False)]
 
 
-def triangular_interior(poligono, passo: float, passo_interior: float = None, nos=None):
+def triangular_interior(poligono, passo: float, passo_interior: float = None):
     """Triangula o interior do poligono. So os pontos do contorno (padrao)
     deixa poligonos grandes com poucos triangulos enormes e chapados (o
     Delaunay so tem os pontos da borda pra trabalhar) -- passo_interior
@@ -299,17 +295,7 @@ def triangular_interior(poligono, passo: float, passo_interior: float = None, no
     acompanhar o relevo de verdade em vez de "esticar" por cima."""
     contorno = densificar_contorno(poligono, passo)
     pontos_lista = list(contorno)
-    if nos is not None:
-        # interior = nos da propria malha renderizada (o decalque/solido fica exatamente sobre a superficie,
-        # sem facetas gigantes cortando o relevo); descarta nos colados no contorno (evita triangulos finos)
-        import shapely
-        dentro = shapely.contains_xy(poligono, nos[:, 0], nos[:, 1])
-        cand = nos[dentro]
-        if len(cand):
-            dist = shapely.distance(poligono.boundary, shapely.points(cand))
-            cand = cand[dist > 0.25 * max(passo, 40.0)]
-        pontos_lista += [tuple(q) for q in cand]
-    elif passo_interior:
+    if passo_interior:
         minx, miny, maxx, maxy = poligono.bounds
         mascara_pt = prep(poligono)
         xs_int = np.arange(minx + passo_interior / 2, maxx, passo_interior)
@@ -325,7 +311,7 @@ def triangular_interior(poligono, passo: float, passo_interior: float = None, no
     return pontos, np.array(triangulos)
 
 
-def construir_solido(poligono, elevacao_fn, espessura=None, base_absoluta=None, base_fn=None, espessura_minima=None, nos=None):
+def construir_solido(poligono, elevacao_fn, espessura=None, base_absoluta=None, base_fn=None, espessura_minima=None):
     """Extrude um poligono num solido fechado (topo drapeado no relevo real +
     base plana/absoluta/geologica + paredes no perimetro) -- mesma logica de
     ../scripts/06_gerar_solidos_estilizados_cubao.py. Usada tanto pro corpo
@@ -338,13 +324,13 @@ def construir_solido(poligono, elevacao_fn, espessura=None, base_absoluta=None, 
     minimo entre base_fn e (topo - espessura_minima), pra nunca deixar o
     solido mais fino que espessura_minima onde a base geologica fica rasa
     demais (ou ate invertida) perto de onde o corpo aflora."""
-    pontos_xy, triangulos_topo = triangular_interior(poligono, PASSO_DENSIFICACAO, None, nos)
+    pontos_xy, triangulos_topo = triangular_interior(poligono, PASSO_DENSIFICACAO)
     if len(triangulos_topo) == 0:
         vazio = np.zeros((0, 3))
         return vazio, np.zeros((0, 3), dtype=int)
     n = len(pontos_xy)
 
-    z_topo = np.array([elevacao_fn(x, y) for x, y in pontos_xy]) + OFFSET_SOLIDO_Z
+    z_topo = np.array([elevacao_fn(x, y) for x, y in pontos_xy])
     if base_fn is not None:
         z_geologica = np.array([base_fn(x, y) for x, y in pontos_xy])
         piso_minimo = z_topo - (espessura_minima or 0.0)
@@ -400,19 +386,19 @@ def construir_corpo_cortado(gdf_corpo, elevacao_fn, eixo, valor_corte, bbox_ampl
     return dict(x=vertices[:, 0], y=vertices[:, 1], z=vertices[:, 2], i=faces[:, 0], j=faces[:, 1], k=faces[:, 2])
 
 
-def construir_decal_plano(poligono, elevacao_fn, offset=None):
+def construir_decal_plano(poligono, elevacao_fn):
     """So o topo (sem base/paredes) drapeado no relevo real, um pouco acima
     (OFFSET_DECAL_Z) pra nao dar z-fighting com a topografia -- "decalque"
     vetorial do mapa geologico real, nao uma amostragem em grade (ver
     comentario em ORDEM_FORMACOES)."""
-    pontos_xy, triangulos = triangular_interior(poligono, PASSO_DENSIFICACAO_DECAL, PASSO_INTERIOR_DECAL, NOS_GRADE)
+    pontos_xy, triangulos = triangular_interior(poligono, PASSO_DENSIFICACAO_DECAL, PASSO_INTERIOR_DECAL)
     if len(triangulos) == 0:
         return np.zeros((0, 3)), np.zeros((0, 3), dtype=int)
-    z = np.array([elevacao_fn(x, y) for x, y in pontos_xy]) + (OFFSET_DECAL_Z if offset is None else offset)
+    z = np.array([elevacao_fn(x, y) for x, y in pontos_xy]) + OFFSET_DECAL_Z
     return np.column_stack([pontos_xy, z]), triangulos
 
 
-def construir_decal_cortado(geoms, elevacao_fn, eixo, valor_corte, bbox_amplo, invertido=False, offset=None):
+def construir_decal_cortado(geoms, elevacao_fn, eixo, valor_corte, bbox_amplo, invertido=False):
     """Mesmo recorte por semiplano de construir_corpo_cortado, mas so o topo
     (decalque plano) -- usado pros poligonos do mapa geologico real."""
     xmin_a, ymin_a, xmax_a, ymax_a = bbox_amplo
@@ -431,7 +417,7 @@ def construir_decal_cortado(geoms, elevacao_fn, eixo, valor_corte, bbox_amplo, i
         for parte in partes:
             if parte.geom_type != "Polygon" or parte.area < 1.0:
                 continue
-            v, f = construir_decal_plano(parte, elevacao_fn, offset)
+            v, f = construir_decal_plano(parte, elevacao_fn)
             if len(v) == 0:
                 continue
             todos_v.append(v)
@@ -487,15 +473,14 @@ def montar_estado(eixo, j, invertido, grid_x, grid_y, grid_z, grid_contatos, top
 
     dados["sill"] = construir_corpo_cortado(
         gdf_sill, elevacao_fn, eixo, valor_corte, bbox_amplo, invertido=invertido,
-        base_fn=lambda x, y: elevacao_serra_alta(x, y, elevacao_fn), espessura_minima=ESPESSURA_MINIMA_SILL, nos=NOS_GRADE,
+        base_fn=lambda x, y: elevacao_serra_alta(x, y, elevacao_fn), espessura_minima=ESPESSURA_MINIMA_SILL,
     )
     dados["dique"] = construir_corpo_cortado(gdf_dique, elevacao_fn, eixo, valor_corte, bbox_amplo,
                                                invertido=invertido, base_absoluta=BASE_Z_ABSOLUTA)
 
     for nome in ORDEM_FORMACOES:
         dados[f"geo_{nome}"] = construir_decal_cortado(
-            formacoes_geoms.get(nome, []), elevacao_fn, eixo, valor_corte, bbox_amplo, invertido=invertido,
-            offset=OFFSETS_DECAL.get(nome, OFFSET_DECAL_Z))
+            formacoes_geoms.get(nome, []), elevacao_fn, eixo, valor_corte, bbox_amplo, invertido=invertido)
 
     # sem colorscale/cmin/cmax aqui de proposito -- isso e fixo (definido uma unica vez no
     # fig.add_trace() inicial) e MUITO grande (um stop por vertice da grade, ver main()); repetir
@@ -511,7 +496,6 @@ def trace_de_tipo(chave, payload):
 
 
 def main():
-    global NOS_GRADE
     xyz = np.load(TOPO_NPY)
     print(f"Topografia: {xyz.shape[0]} pontos")
 
@@ -550,22 +534,7 @@ def main():
     gdf_sill = gdf_lito[gdf_lito["formacao"] == "Soleira"]
     gdf_dique = gdf_lito[gdf_lito["formacao"] == "Dique"]
     print(f"sill: {len(gdf_sill)} lobos, dique: {len(gdf_dique)} corpos (poligonos atualizados, ver litologia_processada.shp)")
-
-    # "erase" do sedimentar pela soleira: dentro do poligono da soleira os contatos acima da base do corpo
-    # colapsam pra essa base -- as camadas deixam de existir ali e a soleira (terreno -> base, mesma base de
-    # construir_solido) ocupa o lugar, sem sobreposicao de superficies.
-    import shapely
-    m_sill = shapely.contains_xy(gdf_sill.geometry.union_all(), grid_x, grid_y)
-    base_sill_grid = np.minimum(grid_contatos[1], grid_z - ESPESSURA_MINIMA_SILL)
-    grid_contatos = [np.where(m_sill, np.minimum(c, base_sill_grid), c) for c in grid_contatos]
-    from scipy.interpolate import RegularGridInterpolator
-    _interp_grade = RegularGridInterpolator((ys, xs), grid_z, bounds_error=False, fill_value=None)
-
-    def elevacao_fn(x, y):
-        """Elevacao coerente com a malha renderizada (63x63): corpos e decalques assentam sobre a mesma superficie."""
-        return float(_interp_grade((y, x)))
-
-    NOS_GRADE = np.column_stack([grid_x.ravel(), grid_y.ravel()])
+    elevacao_fn = montar_elevador(xyz)
     margem = 2000.0
     bbox_amplo = (xmin - margem, ymin - margem, xmax + margem, ymax + margem)
 
@@ -808,7 +777,7 @@ def main():
             fig.add_trace(go.Scatter3d(
                 x=gdf_estr.geometry.x, y=gdf_estr.geometry.y,
                 z=[elevacao_fn(x, y) + 15 for x, y in zip(gdf_estr.geometry.x, gdf_estr.geometry.y)],
-                mode="markers", marker=dict(size=4, symbol="x", color="#000000", line=dict(color="#FFFFFF", width=1)),
+                mode="markers", marker=dict(size=5, symbol="x", color="#000000", line=dict(color="#FFFFFF", width=1)),
                 text=[f"<b>{r.ponto_id}</b><br>{r.classificacao}<br>Azimute: {r.azimute_ou_strike_deg:.0f}°" for r in gdf_estr.itertuples()],
                 hoverinfo="text", name="Falha de campo", showlegend=False, visible=False,
             ))
@@ -824,7 +793,7 @@ def main():
                 lx.append(px); ly.append(py); lz.append(elevacao_fn(px, py) + 12)
             lx.append(None); ly.append(None); lz.append(None)
         idx_estr.append(len(fig.data))
-        fig.add_trace(go.Scatter3d(x=lx, y=ly, z=lz, mode="lines", line=dict(color="#000000", width=3),
+        fig.add_trace(go.Scatter3d(x=lx, y=ly, z=lz, mode="lines", line=dict(color="#000000", width=5),
                                    name="Falha de campo (rumo)", showlegend=False, visible=False, hoverinfo="name"))
     print(f"estruturas 3D: {len(idx_estr)} traces")
 
@@ -1047,7 +1016,7 @@ def main():
         document.body.appendChild(logo);
         var atribuicao = document.createElement('div');
         atribuicao.textContent = 'Criado por Afonso Henrique de Jesus';
-        atribuicao.style.cssText = 'position:fixed; bottom:6px; right:14px; color:{MARCA_CINZA_CLARO}; ' +
+        atribuicao.style.cssText = 'position:fixed; bottom:6px; left:14px; color:{MARCA_CINZA_CLARO}; ' +
             'opacity:0.55; font-family:{MARCA_FONTE}; font-size:11px; z-index:1000;';
         document.body.appendChild(atribuicao);
     }})();
@@ -1375,9 +1344,6 @@ def main():
             return botao(txt, function() {{
                 var a = gd.layout.updatemenus[3].buttons[i].args;
                 Plotly.restyle(gd, a[0], a[1]);
-                // quaternario heuristico (mascara por cota) so nos modos hipsometria/satelite; na geologia vale o poligono vetorial
-                var iq = []; gd.data.forEach(function(tr, k) {{ if (tr.type === 'surface' && /^Dep/.test(tr.name || '')) iq.push(k); }});
-                if (iq.length) Plotly.restyle(gd, {{visible: i !== 1}}, iq);
                 botoesCor.forEach(function(b, k) {{ b.classList.toggle('ativo', k === i); }});
             }});
         }});
@@ -1405,12 +1371,12 @@ def main():
         grupo('Estruturas', btnsEst);
 
         var selExag = el('select', {{title: 'Exagero vertical'}});
-        [['1', '1×'], ['3', '3×'], ['6', '6× (padrão)'], ['10', '10×']].forEach(function(o) {{
-            selExag.appendChild(el('option', {{value: o[0], textContent: o[1], selected: o[0] === '6'}}));
+        [['1', '1×'], ['2', '2×'], ['3', '3× (padrão)'], ['5', '5×'], ['8', '8×']].forEach(function(o) {{
+            selExag.appendChild(el('option', {{value: o[0], textContent: o[1], selected: o[0] === '3'}}));
         }});
         var ASPECTO_BASE = JSON.parse(JSON.stringify(gd.layout.scene.aspectratio));
         selExag.onchange = function() {{
-            Plotly.relayout(gd, {{'scene.aspectratio': {{x: ASPECTO_BASE.x, y: ASPECTO_BASE.y, z: ASPECTO_BASE.z * parseFloat(selExag.value) / 6}}}});
+            Plotly.relayout(gd, {{'scene.aspectratio': {{x: ASPECTO_BASE.x, y: ASPECTO_BASE.y, z: ASPECTO_BASE.z * parseFloat(selExag.value) / {EXAGERO_Z}}}}});
         }};
         var btnGiro = botao('Girar', function() {{ alternarGiro(); sincronizarBarra(); }});
         grupo('Vista', [btnGiro, selExag]);
@@ -1439,8 +1405,8 @@ def main():
         window.addEventListener('resize', ajustarTamanho);
         ajustarTamanho();
 
-        setTimeout(function() {{ tocarAnimacaoCorte(); sincronizarBarra(); }}, 600);
-        setTimeout(function() {{ tocarGiro(); sincronizarBarra(); }}, 400);
+        // inicio sempre com corte e giro DESLIGADOS: modelo inteiro (ultimo passo do corte) e slider sincronizado
+        irParaEixo(0);
         sincronizarBarra();
     }})();
     """

@@ -74,7 +74,7 @@ RESOLUCAO_GRID_TOPO = 63  # pontos por eixo, so para o render (nao afeta o GemPy
 # decalques), entao 4 modos x N_CORTE posicoes multiplica o arquivo rapido; sem baixar a
 # resolucao/densidade dos decalques o HTML passava de 100MB (limite do GitHub sem LFS).
 # pra 110 quando a ferramenta de corte (frames por posicao) fez o HTML passar de 400MB
-EXAGERO_Z = 6.0  # fator de exagero vertical (relevo real e sutil frente a area horizontal)
+EXAGERO_Z = 3.0  # fator de exagero vertical (relevo real e sutil frente a area horizontal)
 BASE_Z_ABSOLUTA = -600.0  # piso do "cubao" -- mesma cota usada em ../scripts/06_gerar_solidos_estilizados_cubao.py
 COR_SILL, COR_DIQUE = "#49B18C", "#AFEC7C"  # paleta do mapa geologico (soleira teal, dique verde claro)
 ESPESSURA_MINIMA_SILL = 27.0  # espessura minima do sill (m) -- mediana real medida em campo (ver
@@ -82,10 +82,10 @@ ESPESSURA_MINIMA_SILL = 27.0  # espessura minima do sill (m) -- mediana real med
 # (base "real" do sill, ver elevacao_serra_alta) fica mais rasa que isso -- evita solido
 # degenerado (quase zero ou invertido) perto de onde o sill aflora/a Serra Alta ja teria sido
 # erodida junto.
-PASSO_DENSIFICACAO = 40.0  # mesma de ../scripts/06_gerar_solidos_estilizados_cubao.py -- so
+PASSO_DENSIFICACAO = 60.0  # mesma de ../scripts/06_gerar_solidos_estilizados_cubao.py -- so
 # pro CORPO SOLIDO do sill/dique (construir_solido), mantido fino de proposito: e o dado
 # cientifico mais importante sempre visivel. NAO usar pro decalque (ver PASSO_DENSIFICACAO_DECAL).
-PASSO_DENSIFICACAO_DECAL = 70.0  # contorno do decalque geologico (so cor/aparencia, nao a forma
+PASSO_DENSIFICACAO_DECAL = 100.0  # contorno do decalque geologico (so cor/aparencia, nao a forma
 # real do corpo) -- mais grosso que PASSO_DENSIFICACAO de proposito, e o maior custo restante
 # por frame de corte (ver historico de reducao de tamanho no CLAUDE.md).
 PASSO_INTERIOR_DECAL = 2100.0  # grade de pontos internos pros decalques geologicos (evita
@@ -743,6 +743,82 @@ def main():
             name="Geoquímica (Alto/Baixo-Ti)", showlegend=False, visible=False,
         ))
 
+    # falhas e fraturas: CPRM (SIG SC 1:500.000) em linhas drapeadas (falha azul, fratura rosa) + falhas de campo
+    # (pontos estruturais classificados como falha/fratura, pretos) -- traces fixas, toggle "Estruturas"
+    idx_estr = []
+    gpkg_regional = PONTOS_CAMPO_GPKG.parent.parent.parent / "dados_base" / "geologia_regional_sc.gpkg"
+    if gpkg_regional.exists():
+        est_cprm = gpd.read_file(gpkg_regional, layer="estrutura")
+        janela_est = box(xmin, ymin, xmax, ymax)
+        for categoria, cor, larg in (("Falha", "#2563EB", 6), ("Fratura", "#D81B73", 4)):
+            ex, ey, ez = [], [], []
+            for g in est_cprm.loc[est_cprm["categoria"] == categoria, "geometry"]:
+                inter = g.intersection(janela_est)
+                for seg in ([inter] if inter.geom_type == "LineString" else list(getattr(inter, "geoms", []))):
+                    if seg.geom_type != "LineString" or seg.length < 30:
+                        continue
+                    n_seg = max(int(seg.length // 120), 2)
+                    for d_seg in np.linspace(0, seg.length, n_seg):
+                        q = seg.interpolate(d_seg)
+                        ex.append(q.x); ey.append(q.y); ez.append(elevacao_fn(q.x, q.y) + 12)
+                    ex.append(None); ey.append(None); ez.append(None)
+            if ex:
+                idx_estr.append(len(fig.data))
+                fig.add_trace(go.Scatter3d(
+                    x=ex, y=ey, z=ez, mode="lines", line=dict(color=cor, width=larg),
+                    name=f"{categoria} (CPRM)", showlegend=False, visible=False, hoverinfo="name",
+                ))
+    pts_estr = PONTOS_CAMPO_GPKG.parent / "nuvem_pontos_direcoes.gpkg"
+    if pts_estr.exists():
+        gdf_estr = gpd.read_file(pts_estr)
+        gdf_estr = gdf_estr[gdf_estr["classificacao"].isin(["falha_ou_dique_ambiguo_relevo_negativo", "fratura_falha"])]
+        if len(gdf_estr):
+            idx_estr.append(len(fig.data))
+            fig.add_trace(go.Scatter3d(
+                x=gdf_estr.geometry.x, y=gdf_estr.geometry.y,
+                z=[elevacao_fn(x, y) + 15 for x, y in zip(gdf_estr.geometry.x, gdf_estr.geometry.y)],
+                mode="markers", marker=dict(size=5, symbol="x", color="#000000", line=dict(color="#FFFFFF", width=1)),
+                text=[f"<b>{r.ponto_id}</b><br>{r.classificacao}<br>Azimute: {r.azimute_ou_strike_deg:.0f}°" for r in gdf_estr.itertuples()],
+                hoverinfo="text", name="Falha de campo", showlegend=False, visible=False,
+            ))
+    # linha de superficie (rumo) de cada falha de campo: segmento de 500 m ao longo do azimute/strike, drapeado
+    if pts_estr.exists() and len(gdf_estr):
+        lx, ly, lz = [], [], []
+        for r in gdf_estr.itertuples():
+            if r.azimute_ou_strike_deg != r.azimute_ou_strike_deg:
+                continue
+            ux, uy = np.sin(np.radians(r.azimute_ou_strike_deg)), np.cos(np.radians(r.azimute_ou_strike_deg))
+            for f in np.linspace(-250, 250, 6):
+                px, py = r.geometry.x + f * ux, r.geometry.y + f * uy
+                lx.append(px); ly.append(py); lz.append(elevacao_fn(px, py) + 12)
+            lx.append(None); ly.append(None); lz.append(None)
+        idx_estr.append(len(fig.data))
+        fig.add_trace(go.Scatter3d(x=lx, y=ly, z=lz, mode="lines", line=dict(color="#000000", width=5),
+                                   name="Falha de campo (rumo)", showlegend=False, visible=False, hoverinfo="name"))
+    print(f"estruturas 3D: {len(idx_estr)} traces")
+
+    # lineamentos de superficie (satelite): positivo (verde) e negativo (laranja), mesmo padrao da secao/webmap
+    idx_lin = []
+    lin_gpkg = PONTOS_CAMPO_GPKG.parent.parent / "lineamentos_direcoes.gpkg"
+    if lin_gpkg.exists():
+        lin = gpd.read_file(lin_gpkg).to_crs(31982)
+        janela_lin = box(xmin, ymin, xmax, ymax)
+        for tipo, cor in (("Positivo", "#2E7D5B"), ("Negativo", "#E8A33D")):
+            ex, ey, ez = [], [], []
+            for g in lin.loc[lin["tipo"] == tipo, "geometry"]:
+                inter = g.intersection(janela_lin)
+                for seg in ([inter] if inter.geom_type == "LineString" else list(getattr(inter, "geoms", []))):
+                    if seg.geom_type != "LineString" or seg.length < 30:
+                        continue
+                    for d_seg in np.linspace(0, seg.length, max(int(seg.length // 120), 2)):
+                        q = seg.interpolate(d_seg)
+                        ex.append(q.x); ey.append(q.y); ez.append(elevacao_fn(q.x, q.y) + 10)
+                    ex.append(None); ey.append(None); ez.append(None)
+            if ex:
+                idx_lin.append(len(fig.data))
+                fig.add_trace(go.Scatter3d(x=ex, y=ey, z=ez, mode="lines", line=dict(color=cor, width=5),
+                                           name=f"Lineamento {tipo.lower()}", showlegend=False, visible=False, hoverinfo="name"))
+
     idx_geo_inicio = 1 + len(ORDEM_TRACES_RESTO) - len(CHAVES_GEO) - 1  # indice da 1a trace de decalque
     idx_satelite_trace = 1 + len(ORDEM_TRACES_RESTO) - 1  # ultimo item de ORDEM_TRACES_RESTO
 
@@ -770,11 +846,6 @@ def main():
         backgroundcolor=MARCA_NAVY, color=MARCA_CINZA_CLARO,
     )
     fig.update_layout(
-        title=dict(
-            text="<b>Modelo 3D Taió Plumbing System</b>",
-            font=dict(family=MARCA_FONTE, size=26, color=MARCA_CINZA_CLARO),
-            x=0.03, xanchor="left",
-        ),
         paper_bgcolor=MARCA_NAVY,
         font=dict(family=MARCA_FONTE, color=MARCA_CINZA_CLARO),
         scene=dict(
@@ -792,8 +863,7 @@ def main():
         ),
         legend=dict(x=0.02, y=0.98, bgcolor="rgba(45,10,74,0.75)", bordercolor=MARCA_ROXO, borderwidth=1,
                     font=dict(color=MARCA_CINZA_CLARO)),
-        margin=dict(l=0, r=0, t=90, b=80),
-        height=900,
+        margin=dict(l=0, r=0, t=10, b=80),
         updatemenus=[
             dict(
                 type="buttons", direction="left", showactive=False,
@@ -917,6 +987,9 @@ def main():
         ],
     )
 
+    for _m in fig.layout.updatemenus:
+        _m.visible = False
+
     eixos_js = ",\n        ".join(
         "{nome:'%s', prefixo:'%s', valores:[%s]}" % (
             modo, prefixo,
@@ -938,7 +1011,7 @@ def main():
         document.head.appendChild(style);
         var logo = document.createElement('img');
         logo.src = 'data:image/jpeg;base64,{logo_b64}';
-        logo.style.cssText = 'position:fixed; top:14px; right:18px; width:64px; height:64px; ' +
+        logo.style.cssText = 'position:fixed; top:8px; right:12px; width:46px; height:46px; ' +
             'border-radius:50%; border:2px solid {MARCA_ROXO}; box-shadow:0 0 10px rgba(123,47,255,0.6); z-index:1000;';
         document.body.appendChild(logo);
         var atribuicao = document.createElement('div');
@@ -955,6 +1028,8 @@ def main():
         var N_CORTE = {N_CORTE};
         var INDICE_PONTOS_CAMPO = {idx_pontos_campo};
         var INDICE_GEOQUIMICA = {idx_geoq};
+        var INDICES_ESTRUTURAS = {idx_estr};
+        var INDICES_LINEAMENTOS = {idx_lin};
         var EIXOS = [
         {eixos_js}
         ];
@@ -1036,6 +1111,18 @@ def main():
             atualizarLabelBotao(6, pontosCampoAtivos ? 'Pontos de Campo: ON' : 'Pontos de Campo: OFF');
         }}
 
+        var lineamentosAtivos = false;
+        function alternarLineamentos() {{
+            lineamentosAtivos = !lineamentosAtivos;
+            if (INDICES_LINEAMENTOS.length) Plotly.restyle(gd, {{visible: lineamentosAtivos}}, INDICES_LINEAMENTOS);
+        }}
+
+        var estruturasAtivas = false;
+        function alternarEstruturas() {{
+            estruturasAtivas = !estruturasAtivas;
+            if (INDICES_ESTRUTURAS.length) Plotly.restyle(gd, {{visible: estruturasAtivas}}, INDICES_ESTRUTURAS);
+        }}
+
         var geoquimicaAtiva = false;
         function alternarGeoquimica() {{
             geoquimicaAtiva = !geoquimicaAtiva;
@@ -1083,6 +1170,10 @@ def main():
             Plotly.relayout(gd, patch);
             Plotly.restyle(gd, {{'colorbar.tickfont.color': t.texto, 'colorbar.title.font.color': t.texto}}, [0]);
             document.body.style.background = t.paper;
+            var raiz = document.documentElement.style, claro = nome === 'claro';
+            raiz.setProperty('--barra-bg', claro ? '#FFFFFF' : '{MARCA_ROXO_ESCURO}');
+            raiz.setProperty('--barra-txt', claro ? '{MARCA_NAVY}' : '{MARCA_CINZA_CLARO}');
+            raiz.setProperty('--barra-btn', claro ? '#EDE3FF' : '{MARCA_NAVY}');
         }}
 
         // animacao inicial de corte: varre o corte atual (eixo Leste-Oeste,
@@ -1183,6 +1274,7 @@ def main():
             if (girando) {{
                 pararGiro();
                 atualizarLabelBotao(7, 'Girar: OFF', 1);
+                sincronizarBarra();
             }}
         }}
         gd.addEventListener('mousedown', cancelarGiroPorInteracao);
@@ -1216,12 +1308,111 @@ def main():
             }}
         }});
 
-        setTimeout(tocarAnimacaoCorte, 600);
-        setTimeout(tocarGiro, 400);
+        // ---- barra superior (padrao dos demais produtos) ----
+        var estilo = document.createElement('style');
+        estilo.textContent =
+            ':root{{--barra-bg:{MARCA_ROXO_ESCURO};--barra-txt:{MARCA_CINZA_CLARO};--barra-btn:{MARCA_NAVY};--ac:{MARCA_ROXO}}}' +
+            '#barra-ferramentas{{display:flex;flex-wrap:wrap;gap:6px 14px;align-items:center;padding:8px 70px 8px 14px;' +
+            'background:var(--barra-bg);color:var(--barra-txt);border-bottom:2px solid var(--ac);font-family:{MARCA_FONTE};font-size:12px}}' +
+            '#barra-ferramentas h1{{font-size:15px;margin:0 8px 0 0}}#barra-ferramentas h1 b{{color:var(--ac)}}' +
+            '#barra-ferramentas .grupo{{display:flex;gap:5px;align-items:center}}' +
+            '#barra-ferramentas label{{opacity:.7;text-transform:uppercase;font-size:10px;letter-spacing:.06em}}' +
+            '#barra-ferramentas button,#barra-ferramentas select{{background:var(--barra-btn);color:var(--barra-txt);' +
+            'border:1px solid var(--ac);border-radius:5px;padding:4px 9px;font:inherit;cursor:pointer}}' +
+            '#barra-ferramentas button.ativo{{background:var(--ac);color:{MARCA_NAVY}}}';
+        document.head.appendChild(estilo);
+        var barra = document.createElement('div');
+        barra.id = 'barra-ferramentas';
+        function el(tag, props) {{ var e = document.createElement(tag); Object.assign(e, props || {{}}); return e; }}
+        function grupo(rotulo, itens) {{
+            var g = el('div', {{className: 'grupo'}});
+            g.appendChild(el('label', {{textContent: rotulo}}));
+            itens.forEach(function(i) {{ g.appendChild(i); }});
+            barra.appendChild(g); return g;
+        }}
+        function botao(texto, aoClicar) {{ var b = el('button', {{textContent: texto}}); b.onclick = aoClicar; return b; }}
+        barra.appendChild(el('h1', {{innerHTML: '<b>Modelo 3D</b> — Taió Plumbing System'}}));
+
+        var botoesEixo = ['Leste → Oeste', 'Oeste → Leste', 'Norte → Sul', 'Sul → Norte'].map(function(txt, i) {{
+            return botao(txt, function() {{ irParaEixo(i); sincronizarBarra(); }});
+        }});
+        var btnCorte = botao('Animar corte', function() {{ alternarAnimacao(); sincronizarBarra(); }});
+        grupo('Corte', botoesEixo.concat([btnCorte]));
+
+        var nomesCor = ['Hipsometria', 'Geologia', 'Satélite'];
+        var botoesCor = nomesCor.map(function(txt, i) {{
+            return botao(txt, function() {{
+                var a = gd.layout.updatemenus[3].buttons[i].args;
+                Plotly.restyle(gd, a[0], a[1]);
+                botoesCor.forEach(function(b, k) {{ b.classList.toggle('ativo', k === i); }});
+            }});
+        }});
+        botoesCor[0].classList.add('ativo');
+        grupo('Cor', botoesCor);
+
+        var btnSolido = botao('Sólido', function() {{ alternarSolido(); sincronizarBarra(); }});
+        var btnTopo = botao('Topografia', function() {{ alternarTopografia(); sincronizarBarra(); }});
+        var btnCampo = botao('Campo', function() {{ alternarPontosCampo(); sincronizarBarra(); }});
+        var btnGeoq = botao('Geoquímica', function() {{ alternarGeoquimica(); sincronizarBarra(); }});
+        // cada elemento estrutural liga/desliga sozinho
+        var GRUPOS_EST = [['Falha CPRM', ['Falha (CPRM)']], ['Fratura CPRM', ['Fratura (CPRM)']],
+                          ['Falha de campo', ['Falha de campo', 'Falha de campo (rumo)']],
+                          ['Lineam. (+)', ['Lineamento positivo']], ['Lineam. (−)', ['Lineamento negativo']]];
+        var estadoEst = GRUPOS_EST.map(function() {{ return false; }});
+        var btnsEst = GRUPOS_EST.map(function(g, i) {{
+            return botao(g[0], function() {{
+                estadoEst[i] = !estadoEst[i];
+                var ids = []; gd.data.forEach(function(tr, k) {{ if (g[1].indexOf(tr.name) >= 0) ids.push(k); }});
+                if (ids.length) Plotly.restyle(gd, {{visible: estadoEst[i]}}, ids);
+                sincronizarBarra();
+            }});
+        }});
+        grupo('Camadas', [btnTopo, btnSolido, btnCampo, btnGeoq]);
+        grupo('Estruturas', btnsEst);
+
+        var selExag = el('select', {{title: 'Exagero vertical'}});
+        [['1', '1×'], ['2', '2×'], ['3', '3× (padrão)'], ['5', '5×'], ['8', '8×']].forEach(function(o) {{
+            selExag.appendChild(el('option', {{value: o[0], textContent: o[1], selected: o[0] === '3'}}));
+        }});
+        var ASPECTO_BASE = JSON.parse(JSON.stringify(gd.layout.scene.aspectratio));
+        selExag.onchange = function() {{
+            Plotly.relayout(gd, {{'scene.aspectratio': {{x: ASPECTO_BASE.x, y: ASPECTO_BASE.y, z: ASPECTO_BASE.z * parseFloat(selExag.value) / {EXAGERO_Z}}}}});
+        }};
+        var btnGiro = botao('Girar', function() {{ alternarGiro(); sincronizarBarra(); }});
+        grupo('Vista', [btnGiro, selExag]);
+
+        var btnEscuro = botao('Escuro', function() {{ aplicarTema('escuro'); btnEscuro.classList.add('ativo'); btnClaro.classList.remove('ativo'); }});
+        var btnClaro = botao('Claro', function() {{ aplicarTema('claro'); btnClaro.classList.add('ativo'); btnEscuro.classList.remove('ativo'); }});
+        btnEscuro.classList.add('ativo');
+        grupo('Tema', [btnEscuro, btnClaro]);
+
+        function sincronizarBarra() {{
+            botoesEixo.forEach(function(b, i) {{ b.classList.toggle('ativo', i === eixoAtual); }});
+            btnCorte.classList.toggle('ativo', animandoCorte);
+            btnGiro.classList.toggle('ativo', girando);
+            btnSolido.classList.toggle('ativo', solidoAtivo);
+            btnTopo.classList.toggle('ativo', topografiaAtiva);
+            btnCampo.classList.toggle('ativo', pontosCampoAtivos);
+            btnGeoq.classList.toggle('ativo', geoquimicaAtiva);
+            btnsEst.forEach(function(b, i) {{ b.classList.toggle('ativo', estadoEst[i]); }});
+        }}
+
+        gd.parentNode.insertBefore(barra, gd);
+        function ajustarTamanho() {{
+            gd.style.height = Math.max(400, window.innerHeight - barra.offsetHeight) + 'px';
+            Plotly.relayout(gd, {{height: Math.max(400, window.innerHeight - barra.offsetHeight), width: window.innerWidth}});
+        }}
+        window.addEventListener('resize', ajustarTamanho);
+        ajustarTamanho();
+
+        // inicio sempre com corte e giro DESLIGADOS: modelo inteiro (ultimo passo do corte) e slider sincronizado
+        irParaEixo(0);
+        sincronizarBarra();
     }})();
     """
 
-    fig.write_html(str(OUT_HTML), include_plotlyjs="inline", full_html=True, post_script=post_script)
+    fig.write_html(str(OUT_HTML), include_plotlyjs="inline", full_html=True, post_script=post_script,
+                   default_height="100%", default_width="100%", config={"responsive": True, "displaylogo": False})
     favicon_tags = (
         '<link rel="icon" type="image/png" href="assets/favicon.png">'
         '<link rel="shortcut icon" href="assets/favicon.ico">'
