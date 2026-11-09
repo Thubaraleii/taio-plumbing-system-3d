@@ -28,7 +28,7 @@ depósito quaternário e os corpos intrusivos (soleiras e diques) em volume, com
 
 ## Idioma e navegação
 
-- **Idioma:** o botão **EN / PT**, ao lado do logotipo, alterna a interface entre português e inglês em tempo real (menus, legendas, dicas, popups, rótulos e textos 3D). A escolha é lembrada no navegador e acompanha os links entre as páginas (`?lang=en`).
+- **Idioma:** o botão **EN / PT**, ao lado do logotipo, alterna a interface entre português e inglês em tempo real (menus, legendas, dicas, popups, rótulos e textos 3D). O padrão é **sempre o português**; o inglês vale na página aberta com `?lang=en`, parâmetro que o botão e os links entre as páginas repassam.
 - **Hub:** o botão **← Hub** volta à página inicial do projeto, mantendo o idioma.
 - **Tradução:** feita no navegador por dicionário (`tps_i18n_dict.py`, embutido na página por `tps_i18n.py` ao gerar o HTML). Dados de origem em português (por exemplo, descrições de campo e nomes próprios de unidades) permanecem no idioma original.
 

@@ -6,7 +6,7 @@ Uso (no fim de cada gerador, depois de salvar o HTML):
 
 O bloco injetado e autonomo (CSS + JS): adiciona, ao lado do logotipo, o botao de idioma (PT <-> EN) e o botao "Hub";
 traduz a interface em tempo real (nos de texto, atributos, legendas e hover do Plotly, popups do Leaflet e textos 3D)
-com um dicionario PT -> EN. A escolha fica em localStorage e viaja entre paginas pelo parametro ?lang=en.
+com um dicionario PT -> EN. O padrao e SEMPRE portugues; o ingles so vale na pagina aberta com ?lang=en (parametro repassado pelos links/hub).
 Idempotente: regravar substitui o bloco anterior.
 """
 import json
@@ -26,9 +26,8 @@ JS = r"""
 (function () {
   if (window.__tpsI18n) return; window.__tpsI18n = true;
   var CFG = __CFG__, DICT = __DICT__, FRAG = __FRAG__, RXS = __RX__.map(function (r) { return [new RegExp(r[0], r[1]), r[2]]; });
-  var qs = new URLSearchParams(location.search), stored = null;
-  try { stored = localStorage.getItem('tps_lang'); } catch (e) {}
-  var lang = qs.get('lang') || stored || 'pt'; if (lang !== 'en') lang = 'pt';
+  var qs = new URLSearchParams(location.search);
+  var lang = qs.get('lang') === 'en' ? 'en' : 'pt';  // padrao SEMPRE portugues
   var cache = {}, MISS = {};
   window.__i18nMiss = MISS;
   var PT_HINT = /[À-ÖØ-öø-ÿ]|\b(de|do|da|dos|das|para|com|sem|por|em|no|na|ao|ou|seção|mapa|camada)\b/i;
@@ -131,7 +130,8 @@ JS = r"""
     box.appendChild(bHub);
   }
   function setLang(l) {
-    lang = l; try { localStorage.setItem('tps_lang', l); } catch (e) {}
+    lang = l;
+    try { var u = new URL(location.href); if (l === 'en') u.searchParams.set('lang', 'en'); else u.searchParams.delete('lang'); history.replaceState(null, '', u.toString()); } catch (e) {}
     document.documentElement.lang = l === 'en' ? 'en' : 'pt-br';
     if (l === 'en') walk(document.documentElement); else restaurar();
     titulo(); plotlyTexto(); links(); rotulos();
