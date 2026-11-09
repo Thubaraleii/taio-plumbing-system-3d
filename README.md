@@ -26,6 +26,12 @@ depósito quaternário e os corpos intrusivos (soleiras e diques) em volume, com
 - **Geologia:** decalques vetoriais dos polígonos (6 unidades + quaternário + soleira + dique) drapeados no relevo.
 - **Corte:** cada posição é um estado pré-calculado (4 modos × 9 posições) que mantém a caixa e a escala fixas.
 
+## Idioma e navegação
+
+- **Idioma:** o botão **EN / PT**, ao lado do logotipo, alterna a interface entre português e inglês em tempo real (menus, legendas, dicas, popups, rótulos e textos 3D). A escolha é lembrada no navegador e acompanha os links entre as páginas (`?lang=en`).
+- **Hub:** o botão **← Hub** volta à página inicial do projeto, mantendo o idioma.
+- **Tradução:** feita no navegador por dicionário (`tps_i18n_dict.py`, embutido na página por `tps_i18n.py` ao gerar o HTML). Dados de origem em português (por exemplo, descrições de campo e nomes próprios de unidades) permanecem no idioma original.
+
 ## Uso
 
 Abra `viewer_3d_taio.html` no navegador (o arquivo é grande, ~90 MB) ou acesse a versão publicada. Arraste para orbitar, role para ampliar; use o controle deslizante inferior para o corte.

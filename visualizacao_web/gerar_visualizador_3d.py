@@ -1413,6 +1413,9 @@ def main():
     html_txt = OUT_HTML.read_text(encoding="utf-8")
     html_txt = html_txt.replace('<head><meta charset="utf-8" /></head>', f'<head><meta charset="utf-8" />{favicon_tags}<title>Modelo 3D — Taió Plumbing System</title></head>', 1)
     OUT_HTML.write_text(html_txt, encoding="utf-8")
+    sys.path.insert(0, str(Path(__file__).parent)) if 'sys' in globals() else __import__('sys').path.insert(0, str(Path(__file__).parent))
+    import tps_i18n  # botao de idioma (PT/EN) e volta ao hub
+    tps_i18n.injetar(OUT_HTML, hub=tps_i18n.HUB_ORIGINAL, acc="#9B6BFF")
     print(f"\nSalvo em: {OUT_HTML}")
 
 
